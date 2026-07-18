@@ -1,0 +1,9 @@
+{
+  "name": "boundary-family-cricket",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Family cricket dashboard — fixtures, results, live scores and player stats, via cricketdata.org.",
+  "engines": {
+    "node": ">=18"
+  }
+}

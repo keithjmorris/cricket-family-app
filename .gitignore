@@ -1,0 +1,14 @@
+# Environment variables (contains the real API key — never commit this)
+.env
+.env.local
+.env*.local
+
+# Vercel
+.vercel
+
+# Dependencies (none currently, but standard to ignore)
+node_modules
+
+# OS/editor cruft
+.DS_Store
+*.log

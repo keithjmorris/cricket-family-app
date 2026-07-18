@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Boundary — Family Cricket Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="brand">
+      <span class="brand-mark">⏱</span>
+      <div class="brand-text">
+        <h1>Boundary</h1>
+        <p>the family cricket board</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" data-tab="live" role="tab" aria-selected="true">Live</button>
+      <button class="tab" data-tab="fixtures" role="tab" aria-selected="false">Fixtures</button>
+      <button class="tab" data-tab="results" role="tab" aria-selected="false">Results</button>
+      <button class="tab" data-tab="players" role="tab" aria-selected="false">Players</button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section id="panel-live" class="panel" data-panel="live">
+    <div class="panel-heading">
+      <h2>Live now</h2>
+      <button class="refresh-btn" id="refresh-live" aria-label="Refresh live scores">↻ Refresh</button>
+    </div>
+    <div id="live-content" class="content-area">
+      <p class="hint">Loading live matches…</p>
+    </div>
+  </section>
+
+  <section id="panel-fixtures" class="panel" data-panel="fixtures" hidden>
+    <div class="panel-heading">
+      <h2>Upcoming fixtures</h2>
+    </div>
+    <div id="fixtures-content" class="content-area">
+      <p class="hint">Loading fixtures…</p>
+    </div>
+  </section>
+
+  <section id="panel-results" class="panel" data-panel="results" hidden>
+    <div class="panel-heading">
+      <h2>Recent results</h2>
+    </div>
+    <div id="results-content" class="content-area">
+      <p class="hint">Loading results…</p>
+    </div>
+  </section>
+
+  <section id="panel-players" class="panel" data-panel="players" hidden>
+    <div class="panel-heading">
+      <h2>Find a player</h2>
+    </div>
+    <div class="content-area">
+      <form id="player-search-form" class="player-search">
+        <input type="text" id="player-search-input" placeholder="Search any player, e.g. Smriti Mandhana" autocomplete="off" />
+        <button type="submit">Search</button>
+      </form>
+      <div id="players-content"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Scorecard overlay: shared by Live and Results, shows batting + bowling detail -->
+<div id="scorecard-overlay" class="overlay" hidden>
+  <div class="overlay-panel">
+    <button class="overlay-close" id="scorecard-close" aria-label="Close scorecard">✕</button>
+    <div id="scorecard-content"><p class="hint">Loading scorecard…</p></div>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <p>Data via <a href="https://cricketdata.org" target="_blank" rel="noopener">cricketdata.org</a>. Scores may lag a few minutes behind real time.</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,395 @@
+/* ============================================================
+   Design tokens — "pavilion scoreboard"
+   Grass green pitch, cream sight-screen, willow tan accent,
+   and a dark mechanical scoreboard panel with amber digits
+   for anything score-related.
+   ============================================================ */
+:root {
+  --grass: #1F4D36;
+  --grass-deep: #163827;
+  --cream: #F1EAD9;
+  --cream-dim: #E4DBC5;
+  --willow: #C9A66B;
+  --ink: #16241C;
+  --board-bg: #101312;
+  --board-line: #2A2F2C;
+  --amber: #E8B94A;
+  --amber-dim: #8A6B24;
+  --won: #7FB88A;
+  --lost: #C97C6B;
+
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--grass-deep); }
+
+/* ---------------- Header ---------------- */
+.site-header {
+  background: var(--grass);
+  color: var(--cream);
+  border-bottom: 4px solid var(--willow);
+}
+.header-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 18px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-mark {
+  font-size: 1.6rem;
+  color: var(--amber);
+  line-height: 1;
+}
+.brand-text h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.6rem;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+.brand-text p {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--cream-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+}
+.tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--cream-dim);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.92rem;
+  padding: 10px 16px 12px;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.tab:hover { color: var(--cream); }
+.tab[aria-selected="true"] {
+  color: var(--cream);
+  border-bottom-color: var(--amber);
+}
+
+/* ---------------- Layout ---------------- */
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 28px 20px 60px;
+}
+.panel-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.panel-heading h2 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.4rem;
+  margin: 0;
+}
+.refresh-btn {
+  appearance: none;
+  border: 1px solid var(--grass);
+  background: transparent;
+  color: var(--grass-deep);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+.refresh-btn:hover { background: var(--grass); color: var(--cream); }
+
+.hint {
+  color: #6b6353;
+  font-size: 0.92rem;
+}
+.error-msg {
+  background: #FBEDE9;
+  border: 1px solid var(--lost);
+  color: #8a3a2b;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+}
+
+/* ---------------- Scoreboard panel (signature element) ----------------
+   Used for any live/completed match score: dark mechanical board,
+   amber monospace digits, small tab-labels — echoes a real cricket
+   ground scoreboard. This is the one recurring visual motif. */
+.scoreboard {
+  background: var(--board-bg);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  cursor: pointer;
+  border: 1px solid var(--board-line);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.scoreboard:hover {
+  border-color: var(--amber-dim);
+  transform: translateY(-1px);
+}
+.scoreboard-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.match-name {
+  color: var(--cream-dim);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.status-tag {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.status-tag.live { background: var(--lost); color: #1a0d0a; }
+.status-tag.done { background: var(--board-line); color: var(--cream-dim); }
+.status-tag.upcoming { background: var(--amber-dim); color: #2a1f08; }
+
+.board-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--board-line);
+}
+.board-row:last-child { border-bottom: none; }
+.board-team {
+  color: var(--cream);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+.board-score {
+  font-family: var(--font-mono);
+  color: var(--amber);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.board-note {
+  margin-top: 10px;
+  color: var(--cream-dim);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+/* ---------------- Fixture / result cards ---------------- */
+.fixture-card {
+  background: #fff;
+  border: 1px solid var(--cream-dim);
+  border-left: 4px solid var(--grass);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.fixture-card.result { border-left-color: var(--willow); }
+.fixture-teams { font-weight: 600; font-size: 0.95rem; }
+.fixture-meta { color: #6b6353; font-size: 0.82rem; margin-top: 3px; }
+.fixture-date {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--grass-deep);
+  text-align: right;
+  white-space: nowrap;
+}
+.result-line {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--willow);
+  margin-top: 3px;
+}
+
+/* ---------------- Players ---------------- */
+.player-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.player-search input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--cream-dim);
+  border-radius: 20px;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  background: #fff;
+}
+.player-search button {
+  appearance: none;
+  border: none;
+  background: var(--grass);
+  color: var(--cream);
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+.player-card {
+  background: #fff;
+  border: 1px solid var(--cream-dim);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+.player-name { font-weight: 600; }
+.player-country { color: #6b6353; font-size: 0.85rem; }
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.stat-box {
+  background: var(--board-bg);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.stat-box .label {
+  color: var(--cream-dim);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.stat-box .value {
+  font-family: var(--font-mono);
+  color: var(--amber);
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+/* ---------------- Scorecard overlay ---------------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 19, 18, 0.7);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  z-index: 100;
+}
+.overlay-panel {
+  background: var(--cream);
+  border-radius: var(--radius);
+  max-width: 640px;
+  width: 100%;
+  padding: 24px 22px 30px;
+  position: relative;
+}
+.overlay-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  appearance: none;
+  border: none;
+  background: var(--ink);
+  color: var(--cream);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.innings-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.1rem;
+  margin: 22px 0 10px;
+  color: var(--grass-deep);
+}
+table.linescore {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+table.linescore th {
+  text-align: left;
+  color: #6b6353;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--ink);
+}
+table.linescore td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--cream-dim);
+}
+table.linescore td.num, table.linescore th.num { text-align: right; font-family: var(--font-mono); }
+.dismissal { color: #6b6353; font-size: 0.78rem; }
+
+/* ---------------- Footer ---------------- */
+.site-footer {
+  text-align: center;
+  padding: 24px 20px 40px;
+  color: #6b6353;
+  font-size: 0.8rem;
+}
+
+/* ---------------- Accessibility / responsive ---------------- */
+button:focus-visible, input:focus-visible, .scoreboard:focus-visible {
+  outline: 2px solid var(--grass-deep);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+@media (max-width: 560px) {
+  .brand-text h1 { font-size: 1.3rem; }
+  .fixture-card { flex-direction: column; align-items: flex-start; }
+  .fixture-date { text-align: left; }
+}
