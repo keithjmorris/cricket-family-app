@@ -101,6 +101,61 @@ a { color: var(--grass-deep); }
   border-bottom-color: var(--amber);
 }
 
+/* ---------------- Filter bar ---------------- */
+.filter-bar {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px 20px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.filter-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6b6353;
+  margin-right: 2px;
+}
+.filter-chip {
+  appearance: none;
+  border: 1px solid var(--cream-dim);
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 7px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.filter-chip:hover { border-color: var(--grass); }
+.filter-chip[aria-pressed="true"] {
+  background: var(--grass);
+  border-color: var(--grass);
+  color: var(--cream);
+}
+.filter-search input {
+  border: 1px solid var(--cream-dim);
+  background: #fff;
+  border-radius: 20px;
+  padding: 7px 14px;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  width: 140px;
+}
+.filter-search input:focus { outline: none; border-color: var(--grass); }
+.pinned-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--amber);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-left: 8px;
+}
+
 /* ---------------- Layout ---------------- */
 main {
   max-width: 960px;
@@ -320,8 +375,6 @@ main {
   padding: 40px 16px;
   overflow-y: auto;
   z-index: 100;
-}.overlay[hidden] {
-  display: none;
 }
 .overlay-panel {
   background: var(--cream);

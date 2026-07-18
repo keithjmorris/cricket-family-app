@@ -34,8 +34,57 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* ---------------- Shared data cache ----------------
+   We keep the last-fetched raw arrays in memory so that changing the team
+   filter, or switching tabs back and forth, re-renders from what we already
+   have instead of spending another API call. Only the Refresh button (and
+   the background live poll) actually goes back to the network. */
+const cache = {
+  live: null,     // array from currentMatches
+  matches: null,  // array from `matches` — shared by BOTH Fixtures and Results
+};
+
+/* ---------------- Team filter ---------------- */
+let activeFilter = 'all'; // 'all' | 'england-men' | 'england-women' | free-text team search
+
+function teamNames(match) { return (match.teams || []).map(String); }
+function isEnglandMen(name) { return /england/i.test(name) && !/women/i.test(name); }
+function isEnglandWomen(name) { return /england/i.test(name) && /women/i.test(name); }
+
+function matchPassesFilter(match) {
+  const teams = teamNames(match);
+  if (activeFilter === 'all') return true;
+  if (activeFilter === 'england-men') return teams.some(isEnglandMen);
+  if (activeFilter === 'england-women') return teams.some(isEnglandWomen);
+  const q = activeFilter.toLowerCase();
+  return teams.some((t) => t.toLowerCase().includes(q));
+}
+
+function setActiveFilter(filter) {
+  activeFilter = filter;
+  $$('.filter-chip').forEach((chip) => chip.setAttribute('aria-pressed', String(chip.dataset.filter === filter)));
+  if (filter === 'all' || filter === 'england-men' || filter === 'england-women') {
+    $('#filter-search-input').value = '';
+  }
+  // Re-render whichever panel is visible, from cache — no new API call.
+  const activePanel = $('.panel:not([hidden])')?.dataset.panel;
+  if (activePanel === 'live' && cache.live) renderLivePanel();
+  if (activePanel === 'fixtures' && cache.matches) renderFixturesPanel();
+  if (activePanel === 'results' && cache.matches) renderResultsPanel();
+}
+
+$$('.filter-chip').forEach((chip) => {
+  chip.addEventListener('click', () => setActiveFilter(chip.dataset.filter));
+});
+$('#filter-search-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $('#filter-search-input').value.trim();
+  if (q) setActiveFilter(q);
+});
+setActiveFilter('all');
+
 /* ---------------- Tabs ---------------- */
-const loaded = { live: false, fixtures: false, results: false };
+const loaded = { live: false, matches: false };
 
 $$('.tab').forEach((tab) => {
   tab.addEventListener('click', () => {
@@ -43,34 +92,72 @@ $$('.tab').forEach((tab) => {
     tab.setAttribute('aria-selected', 'true');
     const name = tab.dataset.tab;
     $$('.panel').forEach((p) => { p.hidden = p.dataset.panel !== name; });
-    if (name === 'live' && !loaded.live) loadLive();
-    if (name === 'fixtures' && !loaded.fixtures) loadFixtures();
-    if (name === 'results' && !loaded.results) loadResults();
+    $('#filter-bar').hidden = name === 'players';
+
+    if (name === 'live') { loaded.live ? renderLivePanel() : loadLive(); startLivePolling(); }
+    else { stopLivePolling(); }
+
+    if (name === 'fixtures') { loaded.matches ? renderFixturesPanel() : loadMatches(); }
+    if (name === 'results') { loaded.matches ? renderResultsPanel() : loadMatches(); }
   });
 });
 
-$('#refresh-live').addEventListener('click', () => loadLive());
+$('#refresh-live').addEventListener('click', () => loadLive(true));
+
+/* ---------------- Budget-conscious auto-refresh ----------------
+   Live scores poll automatically, but ONLY while the Live tab is the one
+   showing AND the browser tab itself is in the foreground — switching away
+   from either stops it. Combined with the server's edge cache (see
+   api/cricket.js), this keeps a full day of intermittent live-watching
+   comfortably inside the free tier's 100 requests/day. */
+const LIVE_POLL_MS = 120000; // 2 minutes
+let livePollTimer = null;
+
+function startLivePolling() {
+  stopLivePolling();
+  livePollTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') loadLive();
+  }, LIVE_POLL_MS);
+}
+function stopLivePolling() {
+  if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  const onLiveTab = $('.panel[data-panel="live"]') && !$('.panel[data-panel="live"]').hidden;
+  if (document.visibilityState === 'visible' && onLiveTab) startLivePolling();
+  else stopLivePolling();
+});
 
 /* ---------------- Live ---------------- */
-async function loadLive() {
+async function loadLive(forceFresh = false) {
   const box = $('#live-content');
-  box.innerHTML = '<p class="hint">Loading live matches…</p>';
+  if (!cache.live || forceFresh) box.innerHTML = '<p class="hint">Loading live matches…</p>';
   try {
     const { data } = await callApi('currentMatches');
     loaded.live = true;
-    const live = (data || []).filter((m) => pick(m, ['matchStarted']) && !pick(m, ['matchEnded']));
-    const recentlyDone = (data || []).filter((m) => pick(m, ['matchEnded']));
-
-    box.innerHTML = '';
-    if (!live.length && !recentlyDone.length) {
-      box.innerHTML = '<p class="hint">No live matches right now. Check back nearer match time, or see Fixtures.</p>';
-      return;
-    }
-    live.forEach((m) => box.appendChild(renderScoreboard(m, 'live')));
-    recentlyDone.forEach((m) => box.appendChild(renderScoreboard(m, 'done')));
+    cache.live = data || [];
+    renderLivePanel();
   } catch (err) {
     box.innerHTML = `<p class="error-msg">Couldn't load live scores: ${escapeHtml(err.message)}</p>`;
   }
+}
+
+function renderLivePanel() {
+  const box = $('#live-content');
+  const all = cache.live || [];
+  const filtered = all.filter(matchPassesFilter);
+  const live = filtered.filter((m) => pick(m, ['matchStarted']) && !pick(m, ['matchEnded']));
+  const recentlyDone = filtered.filter((m) => pick(m, ['matchEnded']));
+
+  box.innerHTML = '';
+  if (!live.length && !recentlyDone.length) {
+    box.innerHTML = all.length
+      ? '<p class="hint">No matches for that team right now. Try a different filter.</p>'
+      : '<p class="hint">No live matches right now. Check back nearer match time, or see Fixtures.</p>';
+    return;
+  }
+  live.forEach((m) => box.appendChild(renderScoreboard(m, 'live')));
+  recentlyDone.forEach((m) => box.appendChild(renderScoreboard(m, 'done')));
 }
 
 function renderScoreboard(match, kind) {
@@ -109,51 +196,73 @@ function renderScoreboard(match, kind) {
   return node;
 }
 
-/* ---------------- Fixtures ---------------- */
-async function loadFixtures() {
+/* ---------------- Fixtures + Results (one shared fetch) ----------------
+   Both tabs read from the same `matches` endpoint, just filtered
+   differently — fetching it twice would waste a call, so it's fetched once
+   here and cached, and each panel derives its own view from that cache. */
+async function loadMatches() {
+  const fixturesBox = $('#fixtures-content');
+  const resultsBox = $('#results-content');
+  if (!fixturesBox.hidden) fixturesBox.innerHTML = '<p class="hint">Loading fixtures…</p>';
+  if (!resultsBox.hidden) resultsBox.innerHTML = '<p class="hint">Loading results…</p>';
+  try {
+    const { data } = await callApi('matches');
+    loaded.matches = true;
+    cache.matches = data || [];
+    renderFixturesPanel();
+    renderResultsPanel();
+  } catch (err) {
+    const msg = `<p class="error-msg">Couldn't load match data: ${escapeHtml(err.message)}</p>`;
+    fixturesBox.innerHTML = msg;
+    resultsBox.innerHTML = msg;
+  }
+}
+
+function renderFixturesPanel() {
   const box = $('#fixtures-content');
-  box.innerHTML = '<p class="hint">Loading fixtures…</p>';
-  try {
-    const { data } = await callApi('matches');
-    loaded.fixtures = true;
-    const upcoming = (data || [])
-      .filter((m) => !pick(m, ['matchStarted']))
-      .sort((a, b) => new Date(pick(a, ['dateTimeGMT', 'date'])) - new Date(pick(b, ['dateTimeGMT', 'date'])));
+  const all = cache.matches || [];
+  const upcoming = all
+    .filter((m) => !pick(m, ['matchStarted']))
+    .filter(matchPassesFilter)
+    .sort((a, b) => new Date(pick(a, ['dateTimeGMT', 'date'])) - new Date(pick(b, ['dateTimeGMT', 'date'])));
 
-    box.innerHTML = '';
-    if (!upcoming.length) {
-      box.innerHTML = '<p class="hint">No upcoming fixtures found in the current data window.</p>';
-      return;
-    }
-    upcoming.forEach((m) => box.appendChild(renderFixtureCard(m, false)));
-  } catch (err) {
-    box.innerHTML = `<p class="error-msg">Couldn't load fixtures: ${escapeHtml(err.message)}</p>`;
+  // Always surface England Men's fixtures first, regardless of date — but
+  // only when no more specific filter is already narrowing the list (if
+  // you've filtered to e.g. "India", pinning England Men wouldn't make sense).
+  let ordered = upcoming;
+  let pinnedCount = 0;
+  if (activeFilter === 'all') {
+    const pinned = upcoming.filter((m) => teamNames(m).some(isEnglandMen));
+    const rest = upcoming.filter((m) => !teamNames(m).some(isEnglandMen));
+    ordered = [...pinned, ...rest];
+    pinnedCount = pinned.length;
   }
+
+  box.innerHTML = '';
+  if (!ordered.length) {
+    box.innerHTML = '<p class="hint">No upcoming fixtures found for that filter in the current data window.</p>';
+    return;
+  }
+  ordered.forEach((m, i) => box.appendChild(renderFixtureCard(m, false, i < pinnedCount)));
 }
 
-/* ---------------- Results ---------------- */
-async function loadResults() {
+function renderResultsPanel() {
   const box = $('#results-content');
-  box.innerHTML = '<p class="hint">Loading results…</p>';
-  try {
-    const { data } = await callApi('matches');
-    loaded.results = true;
-    const finished = (data || [])
-      .filter((m) => pick(m, ['matchEnded']) || (pick(m, ['matchStarted']) && /won|draw|tied|abandon/i.test(pick(m, ['status'], ''))))
-      .sort((a, b) => new Date(pick(b, ['dateTimeGMT', 'date'])) - new Date(pick(a, ['dateTimeGMT', 'date'])));
+  const all = cache.matches || [];
+  const finished = all
+    .filter((m) => pick(m, ['matchEnded']) || (pick(m, ['matchStarted']) && /won|draw|tied|abandon/i.test(pick(m, ['status'], ''))))
+    .filter(matchPassesFilter)
+    .sort((a, b) => new Date(pick(b, ['dateTimeGMT', 'date'])) - new Date(pick(a, ['dateTimeGMT', 'date'])));
 
-    box.innerHTML = '';
-    if (!finished.length) {
-      box.innerHTML = '<p class="hint">No recent results found in the current data window.</p>';
-      return;
-    }
-    finished.forEach((m) => box.appendChild(renderFixtureCard(m, true)));
-  } catch (err) {
-    box.innerHTML = `<p class="error-msg">Couldn't load results: ${escapeHtml(err.message)}</p>`;
+  box.innerHTML = '';
+  if (!finished.length) {
+    box.innerHTML = '<p class="hint">No recent results found for that filter in the current data window.</p>';
+    return;
   }
+  finished.forEach((m) => box.appendChild(renderFixtureCard(m, true, false)));
 }
 
-function renderFixtureCard(match, isResult) {
+function renderFixtureCard(match, isResult, isPinned = false) {
   const name = pick(match, ['name'], (match.teams || []).join(' vs '));
   const venue = pick(match, ['venue'], '');
   const matchType = pick(match, ['matchType'], '');
@@ -168,7 +277,7 @@ function renderFixtureCard(match, isResult) {
   const node = el(`
     <div class="fixture-card ${isResult ? 'result' : ''}" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(name)}">
       <div>
-        <div class="fixture-teams">${escapeHtml(name)}</div>
+        <div class="fixture-teams">${escapeHtml(name)}${isPinned ? '<span class="pinned-tag">Pinned</span>' : ''}</div>
         <div class="fixture-meta">${escapeHtml([matchType, venue].filter(Boolean).join(' · '))}</div>
         ${isResult ? `<div class="result-line">${escapeHtml(status)}</div>` : ''}
       </div>
@@ -343,3 +452,4 @@ async function openPlayer(playerId) {
 
 /* ---------------- Boot ---------------- */
 loadLive();
+startLivePolling();

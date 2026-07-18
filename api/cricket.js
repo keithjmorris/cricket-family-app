@@ -19,7 +19,7 @@ const ALLOWED_ENDPOINTS = new Set([
 // Live data goes stale fast, fixtures/results/players don't.
 // These are Vercel Edge cache lifetimes in seconds, not browser cache.
 const CACHE_SECONDS = {
-  currentMatches: 60,
+  currentMatches: 90,
   matches: 300,
   match_scorecard: 60,
   players_info: 3600,
