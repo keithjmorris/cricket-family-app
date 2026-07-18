@@ -197,18 +197,36 @@ function renderScoreboard(match, kind) {
 }
 
 /* ---------------- Fixtures + Results (one shared fetch) ----------------
-   Both tabs read from the same `matches` endpoint, just filtered
-   differently — fetching it twice would waste a call, so it's fetched once
-   here and cached, and each panel derives its own view from that cache. */
+   The `matches` endpoint returns a shared, worldwide list (every match
+   being played anywhere), roughly 25 at a time via `offset`. A single
+   high-profile match can easily sit on page 2 or 3 rather than page 1, so
+   we fetch a handful of pages and merge them. This costs a few API hits
+   per fetch instead of one — but it's cached client-side afterwards (see
+   `cache.matches`), so it's only paid once per visit, not on every filter
+   or tab change. */
+const MATCHES_PAGES_TO_FETCH = 4; // pages of ~25 → up to ~100 matches merged
+
 async function loadMatches() {
   const fixturesBox = $('#fixtures-content');
   const resultsBox = $('#results-content');
   if (!fixturesBox.hidden) fixturesBox.innerHTML = '<p class="hint">Loading fixtures…</p>';
   if (!resultsBox.hidden) resultsBox.innerHTML = '<p class="hint">Loading results…</p>';
   try {
-    const { data } = await callApi('matches');
+    const pages = await Promise.all(
+      Array.from({ length: MATCHES_PAGES_TO_FETCH }, (_, i) => callApi('matches', { offset: i * 25 }))
+    );
+    const merged = [];
+    const seenIds = new Set();
+    for (const page of pages) {
+      for (const m of page.data || []) {
+        const id = pick(m, ['id']);
+        if (id && seenIds.has(id)) continue;
+        if (id) seenIds.add(id);
+        merged.push(m);
+      }
+    }
     loaded.matches = true;
-    cache.matches = data || [];
+    cache.matches = merged;
     renderFixturesPanel();
     renderResultsPanel();
   } catch (err) {
