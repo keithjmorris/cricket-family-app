@@ -320,6 +320,8 @@ main {
   padding: 40px 16px;
   overflow-y: auto;
   z-index: 100;
+}overlay[hidden] {
+  display: none;
 }
 .overlay-panel {
   background: var(--cream);
