@@ -203,7 +203,18 @@ function renderScoreboard(match, kind) {
    we fetch a handful of pages and merge them. This costs a few API hits
    per fetch instead of one — but it's cached client-side afterwards (see
    `cache.matches`), so it's only paid once per visit, not on every filter
-   or tab change. */
+   or tab change.
+
+   On top of that, marquee series (e.g. England internationals) are pulled
+   directly by their series ID via `series_info` and merged in — this
+   guarantees they show up even if the global list buries them on a page
+   we didn't fetch. Find a series ID from its cricketdata.org URL, e.g.
+   https://cricketdata.org/cricket-data-formats/series/india-tour-of-england-2026-660b3bb0-...
+   → the id is the long code at the end: 660b3bb0-f5ce-453d-835f-5456a1de1c5e */
+const PINNED_SERIES = [
+  { id: '660b3bb0-f5ce-453d-835f-5456a1de1c5e', label: 'India tour of England, 2026' },
+];
+
 const MATCHES_PAGES_TO_FETCH = 4; // pages of ~25 → up to ~100 matches merged
 
 async function loadMatches() {
@@ -212,19 +223,29 @@ async function loadMatches() {
   if (!fixturesBox.hidden) fixturesBox.innerHTML = '<p class="hint">Loading fixtures…</p>';
   if (!resultsBox.hidden) resultsBox.innerHTML = '<p class="hint">Loading results…</p>';
   try {
-    const pages = await Promise.all(
-      Array.from({ length: MATCHES_PAGES_TO_FETCH }, (_, i) => callApi('matches', { offset: i * 25 }))
-    );
+    const pagePromises = Array.from({ length: MATCHES_PAGES_TO_FETCH }, (_, i) => callApi('matches', { offset: i * 25 }));
+    const seriesPromises = PINNED_SERIES.map((s) => callApi('series_info', { id: s.id }).catch(() => null));
+    const [pages, seriesResults] = await Promise.all([Promise.all(pagePromises), Promise.all(seriesPromises)]);
+
     const merged = [];
     const seenIds = new Set();
-    for (const page of pages) {
-      for (const m of page.data || []) {
-        const id = pick(m, ['id']);
-        if (id && seenIds.has(id)) continue;
-        if (id) seenIds.add(id);
-        merged.push(m);
-      }
+    const addMatch = (m) => {
+      const id = pick(m, ['id']);
+      if (id && seenIds.has(id)) return;
+      if (id) seenIds.add(id);
+      merged.push(m);
+    };
+
+    for (const page of pages) (page.data || []).forEach(addMatch);
+
+    // series_info's match list has shown up under a few different keys
+    // across API versions — try the likely ones defensively.
+    for (const result of seriesResults) {
+      if (!result) continue;
+      const list = pick(result.data, ['matchList', 'matches'], null) || (Array.isArray(result.data) ? result.data : []);
+      (list || []).forEach(addMatch);
     }
+
     loaded.matches = true;
     cache.matches = merged;
     renderFixturesPanel();
