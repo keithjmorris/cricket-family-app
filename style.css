@@ -321,7 +321,7 @@ main {
   background: var(--grass);
   color: var(--cream);
   font-weight: 600;
-  padding: 10px 20px;
+  padding: 10px 20px;s
   border-radius: 20px;
   cursor: pointer;
 }
@@ -375,6 +375,9 @@ main {
   padding: 40px 16px;
   overflow-y: auto;
   z-index: 100;
+}
+.overlay[hidden] {
+  display: none;
 }
 .overlay-panel {
   background: var(--cream);
