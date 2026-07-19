@@ -42,6 +42,7 @@ function escapeHtml(str) {
 const cache = {
   live: null,     // array from currentMatches
   matches: null,  // array from `matches` — shared by BOTH Fixtures and Results
+  pinnedSeriesMatches: null, // array from series_info calls — shared by Live AND Fixtures/Results
 };
 
 /* ---------------- Team filter ---------------- */
@@ -110,7 +111,7 @@ $('#refresh-live').addEventListener('click', () => loadLive(true));
    from either stops it. Combined with the server's edge cache (see
    api/cricket.js), this keeps a full day of intermittent live-watching
    comfortably inside the free tier's 100 requests/day. */
-const LIVE_POLL_MS = 120000; // 2 minutes
+const LIVE_POLL_MS = 60000; // 1 minute — comfortable on the 2,000 hits/day plan
 let livePollTimer = null;
 
 function startLivePolling() {
@@ -128,14 +129,56 @@ document.addEventListener('visibilitychange', () => {
   else stopLivePolling();
 });
 
+/* ---------------- Pinned series (shared by Live + Fixtures/Results) ----------------
+   Marquee series are pulled directly by ID via `series_info` so they show up
+   even when the general-purpose endpoints (currentMatches, matches) happen
+   to miss or bury them — this is what fixed the England v India fixture
+   that wasn't appearing in the paginated list. Fetched once and cached,
+   since the series list itself doesn't change minute to minute. */
+const PINNED_SERIES = [
+  { id: '660b3bb0-f5ce-453d-835f-5456a1de1c5e', label: 'India tour of England, 2026' },
+];
+
+async function fetchPinnedSeriesMatches() {
+  if (cache.pinnedSeriesMatches) return cache.pinnedSeriesMatches;
+  const results = await Promise.all(
+    PINNED_SERIES.map((s) => callApi('series_info', { id: s.id }).catch(() => null))
+  );
+  const merged = [];
+  for (const result of results) {
+    if (!result) continue;
+    const list = pick(result.data, ['matchList', 'matches'], null) || (Array.isArray(result.data) ? result.data : []);
+    (list || []).forEach((m) => merged.push(m));
+  }
+  cache.pinnedSeriesMatches = merged;
+  return merged;
+}
+
+function mergeById(...lists) {
+  const merged = [];
+  const seenIds = new Set();
+  for (const list of lists) {
+    for (const m of list || []) {
+      const id = pick(m, ['id']);
+      if (id && seenIds.has(id)) continue;
+      if (id) seenIds.add(id);
+      merged.push(m);
+    }
+  }
+  return merged;
+}
+
 /* ---------------- Live ---------------- */
 async function loadLive(forceFresh = false) {
   const box = $('#live-content');
   if (!cache.live || forceFresh) box.innerHTML = '<p class="hint">Loading live matches…</p>';
   try {
-    const { data } = await callApi('currentMatches');
+    const [currentResult, pinnedMatches] = await Promise.all([
+      callApi('currentMatches'),
+      fetchPinnedSeriesMatches(),
+    ]);
     loaded.live = true;
-    cache.live = data || [];
+    cache.live = mergeById(currentResult.data, pinnedMatches);
     renderLivePanel();
   } catch (err) {
     box.innerHTML = `<p class="error-msg">Couldn't load live scores: ${escapeHtml(err.message)}</p>`;
@@ -203,19 +246,8 @@ function renderScoreboard(match, kind) {
    we fetch a handful of pages and merge them. This costs a few API hits
    per fetch instead of one — but it's cached client-side afterwards (see
    `cache.matches`), so it's only paid once per visit, not on every filter
-   or tab change.
-
-   On top of that, marquee series (e.g. England internationals) are pulled
-   directly by their series ID via `series_info` and merged in — this
-   guarantees they show up even if the global list buries them on a page
-   we didn't fetch. Find a series ID from its cricketdata.org URL, e.g.
-   https://cricketdata.org/cricket-data-formats/series/india-tour-of-england-2026-660b3bb0-...
-   → the id is the long code at the end: 660b3bb0-f5ce-453d-835f-5456a1de1c5e */
-const PINNED_SERIES = [
-  { id: '660b3bb0-f5ce-453d-835f-5456a1de1c5e', label: 'India tour of England, 2026' },
-];
-
-const MATCHES_PAGES_TO_FETCH = 4; // pages of ~25 → up to ~100 matches merged
+   or tab change. Pinned series (see above) are merged in on top. */
+const MATCHES_PAGES_TO_FETCH = 5; // pages of ~25 → up to ~125 matches merged
 
 async function loadMatches() {
   const fixturesBox = $('#fixtures-content');
@@ -224,30 +256,11 @@ async function loadMatches() {
   if (!resultsBox.hidden) resultsBox.innerHTML = '<p class="hint">Loading results…</p>';
   try {
     const pagePromises = Array.from({ length: MATCHES_PAGES_TO_FETCH }, (_, i) => callApi('matches', { offset: i * 25 }));
-    const seriesPromises = PINNED_SERIES.map((s) => callApi('series_info', { id: s.id }).catch(() => null));
-    const [pages, seriesResults] = await Promise.all([Promise.all(pagePromises), Promise.all(seriesPromises)]);
-
-    const merged = [];
-    const seenIds = new Set();
-    const addMatch = (m) => {
-      const id = pick(m, ['id']);
-      if (id && seenIds.has(id)) return;
-      if (id) seenIds.add(id);
-      merged.push(m);
-    };
-
-    for (const page of pages) (page.data || []).forEach(addMatch);
-
-    // series_info's match list has shown up under a few different keys
-    // across API versions — try the likely ones defensively.
-    for (const result of seriesResults) {
-      if (!result) continue;
-      const list = pick(result.data, ['matchList', 'matches'], null) || (Array.isArray(result.data) ? result.data : []);
-      (list || []).forEach(addMatch);
-    }
+    const [pages, pinnedMatches] = await Promise.all([Promise.all(pagePromises), fetchPinnedSeriesMatches()]);
+    const pageLists = pages.map((p) => p.data || []);
 
     loaded.matches = true;
-    cache.matches = merged;
+    cache.matches = mergeById(...pageLists, pinnedMatches);
     renderFixturesPanel();
     renderResultsPanel();
   } catch (err) {
