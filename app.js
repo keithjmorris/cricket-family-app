@@ -148,10 +148,35 @@ async function fetchPinnedSeriesMatches() {
   for (const result of results) {
     if (!result) continue;
     const list = pick(result.data, ['matchList', 'matches'], null) || (Array.isArray(result.data) ? result.data : []);
-    (list || []).forEach((m) => merged.push(m));
+    // `series_info` gives schedule data, not a live feed — its matchStarted/
+    // matchEnded flags have proven unreliable (a finished match can still
+    // say "Match starts at..."). Tag these so Fixtures/Results can work out
+    // upcoming-vs-finished from the date instead of trusting those flags.
+    (list || []).forEach((m) => merged.push({ ...m, _pinned: true }));
   }
   cache.pinnedSeriesMatches = merged;
   return merged;
+}
+
+// Rough, deliberately generous match-length estimates used only to decide
+// whether a pinned-series match is "finished" for Results purposes — better
+// to occasionally call a match unfinished a bit too long than to wrongly
+// mark a still-live match as done.
+function pinnedMatchDurationHours(match) {
+  const type = String(pick(match, ['matchType'], '')).toLowerCase();
+  if (type === 'test') return 24 * 6;
+  if (type === 'odi') return 11;
+  return 7; // t20 and anything unrecognised
+}
+function pinnedMatchIsUpcoming(match) {
+  const start = new Date(pick(match, ['dateTimeGMT', 'date']));
+  if (isNaN(start)) return !pick(match, ['matchStarted']);
+  return start.getTime() > Date.now();
+}
+function pinnedMatchIsFinished(match) {
+  const start = new Date(pick(match, ['dateTimeGMT', 'date']));
+  if (isNaN(start)) return !!pick(match, ['matchEnded']);
+  return Date.now() > start.getTime() + pinnedMatchDurationHours(match) * 3600 * 1000;
 }
 
 function mergeById(...lists) {
@@ -168,17 +193,20 @@ function mergeById(...lists) {
   return merged;
 }
 
-/* ---------------- Live ---------------- */
+/* ---------------- Live ----------------
+   Deliberately relies ONLY on currentMatches. An earlier version also
+   merged in pinned-series matches here, but series_info's status flags
+   turned out not to reflect real live state (a finished match could still
+   read "Match starts at..."), which produced wrong Live/Ended tags, blank
+   scores, and scorecard errors. currentMatches is cricketdata.org's actual
+   live-tracking endpoint, so it's the only trustworthy source for this tab. */
 async function loadLive(forceFresh = false) {
   const box = $('#live-content');
   if (!cache.live || forceFresh) box.innerHTML = '<p class="hint">Loading live matches…</p>';
   try {
-    const [currentResult, pinnedMatches] = await Promise.all([
-      callApi('currentMatches'),
-      fetchPinnedSeriesMatches(),
-    ]);
+    const { data } = await callApi('currentMatches');
     loaded.live = true;
-    cache.live = mergeById(currentResult.data, pinnedMatches);
+    cache.live = data || [];
     renderLivePanel();
   } catch (err) {
     box.innerHTML = `<p class="error-msg">Couldn't load live scores: ${escapeHtml(err.message)}</p>`;
@@ -274,7 +302,7 @@ function renderFixturesPanel() {
   const box = $('#fixtures-content');
   const all = cache.matches || [];
   const upcoming = all
-    .filter((m) => !pick(m, ['matchStarted']))
+    .filter((m) => (m._pinned ? pinnedMatchIsUpcoming(m) : !pick(m, ['matchStarted'])))
     .filter(matchPassesFilter)
     .sort((a, b) => new Date(pick(a, ['dateTimeGMT', 'date'])) - new Date(pick(b, ['dateTimeGMT', 'date'])));
 
@@ -302,7 +330,7 @@ function renderResultsPanel() {
   const box = $('#results-content');
   const all = cache.matches || [];
   const finished = all
-    .filter((m) => pick(m, ['matchEnded']) || (pick(m, ['matchStarted']) && /won|draw|tied|abandon/i.test(pick(m, ['status'], ''))))
+    .filter((m) => (m._pinned ? pinnedMatchIsFinished(m) : (pick(m, ['matchEnded']) || (pick(m, ['matchStarted']) && /won|draw|tied|abandon/i.test(pick(m, ['status'], ''))))))
     .filter(matchPassesFilter)
     .sort((a, b) => new Date(pick(b, ['dateTimeGMT', 'date'])) - new Date(pick(a, ['dateTimeGMT', 'date'])));
 
