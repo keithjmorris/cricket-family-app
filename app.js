@@ -217,6 +217,23 @@ function parseScoreString(s) {
   if (!match) return null;
   return { r: match[1], w: match[2], o: match[3] };
 }
+// Rough, deliberately generous match-length estimates — used to sanity-check
+// cricScore's "ms":"live" flag, which has shown at least one real case of
+// staying stuck on "live" for a match that finished days ago (a genuine
+// data bug on cricketdata.org's side, confirmed by comparing two England v
+// India entries — one correctly moved to "result", one didn't).
+function estimatedMatchDurationHours(matchType) {
+  const type = String(matchType || '').toLowerCase();
+  if (type === 'test') return 24 * 6;
+  if (type === 'odi') return 11;
+  return 7; // t20 and anything unrecognised
+}
+function formatMatchDate(dateTimeGMT) {
+  const d = new Date(dateTimeGMT);
+  if (isNaN(d)) return '';
+  return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
 function normalizeCricScoreMatch(m) {
   const t1 = cleanTeamName(m.t1);
   const t2 = cleanTeamName(m.t2);
@@ -225,16 +242,27 @@ function normalizeCricScoreMatch(m) {
   const score = [];
   if (s1) score.push({ inning: t1, ...s1 });
   if (s2) score.push({ inning: t2, ...s2 });
+
+  const start = new Date(m.dateTimeGMT).getTime();
+  const durationMs = estimatedMatchDurationHours(m.matchType) * 3600 * 1000;
+  const likelyActuallyFinished = !isNaN(start) && Date.now() > start + durationMs;
+  const dateLabel = formatMatchDate(m.dateTimeGMT);
+
   return {
     id: m.id,
     name: [t1, t2].filter(Boolean).join(' vs ') + (m.series ? `, ${m.series}` : ''),
     teams: [t1, t2],
     matchType: m.matchType,
     dateTimeGMT: m.dateTimeGMT,
-    status: 'Live',
+    // If the scheduled start is far enough in the past that the match must
+    // be over, don't trust "live" — show it as finished instead, with a
+    // status that's honest about not having a confirmed result.
+    status: likelyActuallyFinished
+      ? `${dateLabel} — likely finished (cricketdata.org hasn't confirmed a result yet)`
+      : `Live · ${dateLabel}`,
     score,
     matchStarted: true,
-    matchEnded: false,
+    matchEnded: likelyActuallyFinished,
   };
 }
 
