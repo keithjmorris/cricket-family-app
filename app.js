@@ -179,17 +179,24 @@ function pinnedMatchIsFinished(match) {
   return Date.now() > start.getTime() + pinnedMatchDurationHours(match) * 3600 * 1000;
 }
 
+function dedupeDateKey(match) {
+  const raw = pick(match, ['dateTimeGMT', 'date'], '');
+  const parsed = new Date(raw);
+  if (!isNaN(parsed)) return parsed.toISOString().slice(0, 10);
+  return String(raw).slice(0, 10); // fallback if the date string is unparseable
+}
+
 function mergeById(...lists) {
   const merged = [];
   const seenKeys = new Set();
   for (const list of lists) {
     for (const m of list || []) {
-      // Different endpoints have shown different internal IDs for the same
-      // real match, so ID alone isn't a safe dedupe key — team names + date
-      // (day-level) identifies "the same match" far more reliably here.
+      // Different endpoints have shown different internal IDs — and even
+      // different date string formats — for the same real match, so both
+      // need normalizing before we can reliably tell "same match" apart
+      // from "different match, coincidentally same teams".
       const teamKey = teamNames(m).map((t) => t.toLowerCase().trim()).sort().join('|');
-      const dateKey = String(pick(m, ['dateTimeGMT', 'date'], '')).slice(0, 10);
-      const key = teamKey ? `${teamKey}::${dateKey}` : pick(m, ['id'], JSON.stringify(m));
+      const key = teamKey ? `${teamKey}::${dedupeDateKey(m)}` : pick(m, ['id'], JSON.stringify(m));
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
       merged.push(m);
