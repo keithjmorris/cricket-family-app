@@ -1,12 +1,12 @@
-// app.js — talks only to our own /api/cricket proxy, never to cricketdata.org
+// app.js — talks only to our own /api/cricket proxy, never to Highlightly
 // directly (the API key lives server-side only, see api/cricket.js).
 
 const $ = (sel, scope = document) => scope.querySelector(sel);
 const $$ = (sel, scope = document) => [...scope.querySelectorAll(sel)];
 
-async function callApi(endpoint, params = {}) {
+async function callApi(path, params = {}) {
   const url = new URL('/api/cricket', window.location.origin);
-  url.searchParams.set('endpoint', endpoint);
+  url.searchParams.set('path', path);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const res = await fetch(url.toString());
   const json = await res.json();
@@ -14,8 +14,9 @@ async function callApi(endpoint, params = {}) {
   return json;
 }
 
-// Tries a list of possible property paths (the free-tier API's exact field
-// names have varied slightly across versions/docs) and returns the first hit.
+// Tries a list of possible property paths — kept from the earlier version
+// since Highlightly's own fields occasionally come back null rather than
+// omitted, and this treats both the same way.
 function pick(obj, paths, fallback = '') {
   for (const path of paths) {
     const value = path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
@@ -34,15 +35,16 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-/* ---------------- Shared data cache ----------------
-   We keep the last-fetched raw arrays in memory so that changing the team
-   filter, or switching tabs back and forth, re-renders from what we already
-   have instead of spending another API call. Only the Refresh button (and
-   the background live poll) actually goes back to the network. */
+function todayISO(offsetDays = 0) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+
+/* ---------------- Shared data cache ---------------- */
 const cache = {
-  live: null,     // array from currentMatches
-  matches: null,  // array from `matches` — shared by BOTH Fixtures and Results
-  pinnedSeriesMatches: null, // array from series_info calls — shared by Live AND Fixtures/Results
+  live: null,     // normalized array, built from today's + yesterday's matches
+  matches: null,  // normalized array, built from a date-range sweep — shared by Fixtures AND Results
 };
 
 /* ---------------- Team filter ---------------- */
@@ -67,7 +69,6 @@ function setActiveFilter(filter) {
   if (filter === 'all' || filter === 'england-men' || filter === 'england-women') {
     $('#filter-search-input').value = '';
   }
-  // Re-render whichever panel is visible, from cache — no new API call.
   const activePanel = $('.panel:not([hidden])')?.dataset.panel;
   if (activePanel === 'live' && cache.live) renderLivePanel();
   if (activePanel === 'fixtures' && cache.matches) renderFixturesPanel();
@@ -105,13 +106,12 @@ $$('.tab').forEach((tab) => {
 
 $('#refresh-live').addEventListener('click', () => loadLive(true));
 
-/* ---------------- Budget-conscious auto-refresh ----------------
-   Live scores poll automatically, but ONLY while the Live tab is the one
-   showing AND the browser tab itself is in the foreground — switching away
-   from either stops it. Combined with the server's edge cache (see
-   api/cricket.js), this keeps a full day of intermittent live-watching
-   comfortably inside the free tier's 100 requests/day. */
-const LIVE_POLL_MS = 60000; // 1 minute — comfortable on the 2,000 hits/day plan
+/* ---------------- Auto-refresh ----------------
+   Live scores poll automatically, but ONLY while the Live tab is showing
+   AND the browser tab itself is in the foreground. On the 7,500 requests/
+   day Highlightly plan this can run considerably faster than the old
+   cricketdata.org setup allowed. */
+const LIVE_POLL_MS = 20000; // 20 seconds
 let livePollTimer = null;
 
 function startLivePolling() {
@@ -129,160 +129,85 @@ document.addEventListener('visibilitychange', () => {
   else stopLivePolling();
 });
 
-/* ---------------- Pinned series (shared by Live + Fixtures/Results) ----------------
-   Marquee series are pulled directly by ID via `series_info` so they show up
-   even when the general-purpose endpoints (currentMatches, matches) happen
-   to miss or bury them — this is what fixed the England v India fixture
-   that wasn't appearing in the paginated list. Fetched once and cached,
-   since the series list itself doesn't change minute to minute. */
-const PINNED_SERIES = [
-  { id: '660b3bb0-f5ce-453d-835f-5456a1de1c5e', label: 'India tour of England, 2026' },
-];
+/* ---------------- Normalizing Highlightly matches ----------------
+   Highlightly's match shape (homeTeam/awayTeam objects, state.description,
+   startTime, format, league) is different from what the rest of this file
+   was originally built around — so everything gets converted once, here,
+   into a common shape the render functions below already know how to draw:
+   { id, name, teams[], matchType, dateTimeGMT, status, score[],
+     matchStarted, matchEnded }. */
+const LIVE_STATES = ['In play', 'Stumps', 'Lunch', 'Innings break', 'Drinks', 'Timeout', 'Tea'];
+const FINISHED_STATES = ['Finished', 'Abandoned', 'Cancelled'];
 
-async function fetchPinnedSeriesMatches() {
-  if (cache.pinnedSeriesMatches) return cache.pinnedSeriesMatches;
-  const results = await Promise.all(
-    PINNED_SERIES.map((s) => callApi('series_info', { id: s.id }).catch(() => null))
-  );
-  const merged = [];
-  for (const result of results) {
-    if (!result) continue;
-    const list = pick(result.data, ['matchList', 'matches'], null) || (Array.isArray(result.data) ? result.data : []);
-    // `series_info` gives schedule data, not a live feed — its matchStarted/
-    // matchEnded flags have proven unreliable (a finished match can still
-    // say "Match starts at..."). Tag these so Fixtures/Results can work out
-    // upcoming-vs-finished from the date instead of trusting those flags.
-    (list || []).forEach((m) => merged.push({ ...m, _pinned: true }));
+function parseHlTeamScore(scoreStr, infoStr) {
+  const m = String(scoreStr || '').match(/(\d+)\s*\/\s*(\d+)/);
+  const oMatch = String(infoStr || '').match(/([\d.]+)\s*ov/);
+  return {
+    r: m ? m[1] : '-',
+    w: m ? m[2] : '-',
+    o: oMatch ? oMatch[1] : '',
+  };
+}
+
+function normalizeMatch(m) {
+  const home = m.homeTeam || {};
+  const away = m.awayTeam || {};
+  const teams = [home.name, away.name].filter(Boolean);
+  const desc = pick(m, ['state.description'], '');
+  const isLive = LIVE_STATES.includes(desc);
+  const isFinished = FINISHED_STATES.includes(desc);
+
+  const score = [];
+  const stateTeams = m.state && m.state.teams;
+  if (stateTeams) {
+    if (home.name && stateTeams.home) score.push({ inning: home.name, ...parseHlTeamScore(stateTeams.home.score, stateTeams.home.info) });
+    if (away.name && stateTeams.away) score.push({ inning: away.name, ...parseHlTeamScore(stateTeams.away.score, stateTeams.away.info) });
   }
-  cache.pinnedSeriesMatches = merged;
-  return merged;
-}
 
-// Rough, deliberately generous match-length estimates used only to decide
-// whether a pinned-series match is "finished" for Results purposes — better
-// to occasionally call a match unfinished a bit too long than to wrongly
-// mark a still-live match as done.
-function pinnedMatchDurationHours(match) {
-  const type = String(pick(match, ['matchType'], '')).toLowerCase();
-  if (type === 'test') return 24 * 6;
-  if (type === 'odi') return 11;
-  return 7; // t20 and anything unrecognised
-}
-function pinnedMatchIsUpcoming(match) {
-  const start = new Date(pick(match, ['dateTimeGMT', 'date']));
-  if (isNaN(start)) return !pick(match, ['matchStarted']);
-  return start.getTime() > Date.now();
-}
-function pinnedMatchIsFinished(match) {
-  const start = new Date(pick(match, ['dateTimeGMT', 'date']));
-  if (isNaN(start)) return !!pick(match, ['matchEnded']);
-  return Date.now() > start.getTime() + pinnedMatchDurationHours(match) * 3600 * 1000;
-}
-
-function dedupeDateKey(match) {
-  const raw = pick(match, ['dateTimeGMT', 'date'], '');
-  const parsed = new Date(raw);
-  if (!isNaN(parsed)) return parsed.toISOString().slice(0, 10);
-  return String(raw).slice(0, 10); // fallback if the date string is unparseable
+  return {
+    id: m.id,
+    name: teams.join(' vs ') + (m.league ? `, ${m.league.name}` : ''),
+    teams,
+    matchType: m.format,
+    dateTimeGMT: m.startTime || m.startDate,
+    status: pick(m, ['state.report'], desc),
+    score,
+    matchStarted: isLive || isFinished,
+    matchEnded: isFinished,
+  };
 }
 
 function mergeById(...lists) {
   const merged = [];
-  const seenKeys = new Set();
+  const seen = new Set();
   for (const list of lists) {
     for (const m of list || []) {
-      // Different endpoints have shown different internal IDs — and even
-      // different date string formats — for the same real match, so both
-      // need normalizing before we can reliably tell "same match" apart
-      // from "different match, coincidentally same teams".
-      const teamKey = teamNames(m).map((t) => t.toLowerCase().trim()).sort().join('|');
-      const key = teamKey ? `${teamKey}::${dedupeDateKey(m)}` : pick(m, ['id'], JSON.stringify(m));
-      if (seenKeys.has(key)) continue;
-      seenKeys.add(key);
+      const id = pick(m, ['id']);
+      const key = id || JSON.stringify(m);
+      if (seen.has(key)) continue;
+      seen.add(key);
       merged.push(m);
     }
   }
   return merged;
 }
 
-// `cricScore` uses a different, more compact shape than currentMatches
-// (t1/t2 team names, t1s/t2s score strings, and an "ms" field). We only
-// trust ms === 'live' from it — the other possible values aren't confirmed,
-// and guessing wrong is exactly what went wrong with series_info earlier.
-function cleanTeamName(name) {
-  return String(name || '').replace(/\s*\[[^\]]*\]\s*$/, '').trim();
-}
-function parseScoreString(s) {
-  const match = String(s || '').match(/(\d+)\s*\/\s*(\d+)\s*\(([\d.]+)/);
-  if (!match) return null;
-  return { r: match[1], w: match[2], o: match[3] };
-}
-// Rough, deliberately generous match-length estimates — used to sanity-check
-// cricScore's "ms":"live" flag, which has shown at least one real case of
-// staying stuck on "live" for a match that finished days ago (a genuine
-// data bug on cricketdata.org's side, confirmed by comparing two England v
-// India entries — one correctly moved to "result", one didn't).
-function estimatedMatchDurationHours(matchType) {
-  const type = String(matchType || '').toLowerCase();
-  if (type === 'test') return 24 * 6;
-  if (type === 'odi') return 11;
-  return 7; // t20 and anything unrecognised
-}
-function formatMatchDate(dateTimeGMT) {
-  const d = new Date(dateTimeGMT);
-  if (isNaN(d)) return '';
-  return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-function normalizeCricScoreMatch(m) {
-  const t1 = cleanTeamName(m.t1);
-  const t2 = cleanTeamName(m.t2);
-  const s1 = parseScoreString(m.t1s);
-  const s2 = parseScoreString(m.t2s);
-  const score = [];
-  if (s1) score.push({ inning: t1, ...s1 });
-  if (s2) score.push({ inning: t2, ...s2 });
-
-  const start = new Date(m.dateTimeGMT).getTime();
-  const durationMs = estimatedMatchDurationHours(m.matchType) * 3600 * 1000;
-  const likelyActuallyFinished = !isNaN(start) && Date.now() > start + durationMs;
-  const dateLabel = formatMatchDate(m.dateTimeGMT);
-
-  return {
-    id: m.id,
-    name: [t1, t2].filter(Boolean).join(' vs ') + (m.series ? `, ${m.series}` : ''),
-    teams: [t1, t2],
-    matchType: m.matchType,
-    dateTimeGMT: m.dateTimeGMT,
-    // If the scheduled start is far enough in the past that the match must
-    // be over, don't trust "live" — show it as finished instead, with a
-    // status that's honest about not having a confirmed result.
-    status: likelyActuallyFinished
-      ? `${dateLabel} — likely finished (cricketdata.org hasn't confirmed a result yet)`
-      : `Live · ${dateLabel}`,
-    score,
-    matchStarted: true,
-    matchEnded: likelyActuallyFinished,
-  };
-}
-
 /* ---------------- Live ----------------
-   Uses currentMatches as the primary source, plus cricScore as a second
-   check — cricScore's "ms":"live" flag has caught matches currentMatches
-   itself was missing (this is how the England v India ODI was found). */
+   Highlightly doesn't have a single "current live matches" endpoint — it's
+   built from querying by date. Today's and yesterday's dates cover matches
+   still running past midnight UTC (e.g. Tests, or a match that started late
+   yesterday) without needing to sweep a wide range every poll. */
 async function loadLive(forceFresh = false) {
   const box = $('#live-content');
   if (!cache.live || forceFresh) box.innerHTML = '<p class="hint">Loading live matches…</p>';
   try {
-    const [currentResult, scoreResult] = await Promise.all([
-      callApi('currentMatches'),
-      callApi('cricScore').catch(() => ({ data: [] })),
+    const [today, yesterday] = await Promise.all([
+      callApi('matches', { date: todayISO(0) }),
+      callApi('matches', { date: todayISO(-1) }),
     ]);
-    const trulyLiveFromScore = (scoreResult.data || [])
-      .filter((m) => m.ms === 'live')
-      .map(normalizeCricScoreMatch);
+    const merged = mergeById(today.data, yesterday.data);
     loaded.live = true;
-    cache.live = mergeById(currentResult.data, trulyLiveFromScore);
+    cache.live = merged.map(normalizeMatch);
     renderLivePanel();
   } catch (err) {
     box.innerHTML = `<p class="error-msg">Couldn't load live scores: ${escapeHtml(err.message)}</p>`;
@@ -293,8 +218,8 @@ function renderLivePanel() {
   const box = $('#live-content');
   const all = cache.live || [];
   const filtered = all.filter(matchPassesFilter);
-  const live = filtered.filter((m) => pick(m, ['matchStarted']) && !pick(m, ['matchEnded']));
-  const recentlyDone = filtered.filter((m) => pick(m, ['matchEnded']));
+  const live = filtered.filter((m) => m.matchStarted && !m.matchEnded);
+  const recentlyDone = filtered.filter((m) => m.matchEnded);
 
   box.innerHTML = '';
   if (!live.length && !recentlyDone.length) {
@@ -313,13 +238,13 @@ function renderScoreboard(match, kind) {
   const scores = match.score || [];
 
   const rows = scores.map((s) => {
-    const inningTeam = pick(s, ['inning'], '').replace(/ Inning.*/i, '');
+    const inningTeam = pick(s, ['inning'], '');
     const r = pick(s, ['r'], '-');
     const w = pick(s, ['w'], '-');
-    const o = pick(s, ['o'], '-');
+    const o = pick(s, ['o'], '');
     return `<div class="board-row">
-      <span class="board-team">${escapeHtml(inningTeam || '')}</span>
-      <span class="board-score">${escapeHtml(r)}/${escapeHtml(w)} <span style="opacity:.6">(${escapeHtml(o)} ov)</span></span>
+      <span class="board-team">${escapeHtml(inningTeam)}</span>
+      <span class="board-score">${escapeHtml(r)}/${escapeHtml(w)}${o ? ` <span style="opacity:.6">(${escapeHtml(o)} ov)</span>` : ''}</span>
     </div>`;
   }).join('');
 
@@ -344,14 +269,13 @@ function renderScoreboard(match, kind) {
 }
 
 /* ---------------- Fixtures + Results (one shared fetch) ----------------
-   The `matches` endpoint returns a shared, worldwide list (every match
-   being played anywhere), roughly 25 at a time via `offset`. A single
-   high-profile match can easily sit on page 2 or 3 rather than page 1, so
-   we fetch a handful of pages and merge them. This costs a few API hits
-   per fetch instead of one — but it's cached client-side afterwards (see
-   `cache.matches`), so it's only paid once per visit, not on every filter
-   or tab change. Pinned series (see above) are merged in on top. */
-const MATCHES_PAGES_TO_FETCH = 5; // pages of ~25 → up to ~125 matches merged
+   Highlightly's /matches requires at least one "primary" query parameter —
+   there's no open-ended "everything upcoming" call. So this sweeps a fixed
+   date window (a few days back, plus a week and a half forward) with one
+   call per day, merges the results, and lets the existing team filters and
+   upcoming/finished classification work exactly as they did before. */
+const FIXTURES_DAYS_PAST = 3;
+const FIXTURES_DAYS_FUTURE = 10;
 
 async function loadMatches() {
   const fixturesBox = $('#fixtures-content');
@@ -359,12 +283,13 @@ async function loadMatches() {
   if (!fixturesBox.hidden) fixturesBox.innerHTML = '<p class="hint">Loading fixtures…</p>';
   if (!resultsBox.hidden) resultsBox.innerHTML = '<p class="hint">Loading results…</p>';
   try {
-    const pagePromises = Array.from({ length: MATCHES_PAGES_TO_FETCH }, (_, i) => callApi('matches', { offset: i * 25 }));
-    const [pages, pinnedMatches] = await Promise.all([Promise.all(pagePromises), fetchPinnedSeriesMatches()]);
-    const pageLists = pages.map((p) => p.data || []);
+    const offsets = [];
+    for (let i = -FIXTURES_DAYS_PAST; i <= FIXTURES_DAYS_FUTURE; i++) offsets.push(i);
+    const pages = await Promise.all(offsets.map((offset) => callApi('matches', { date: todayISO(offset) })));
+    const merged = mergeById(...pages.map((p) => p.data || []));
 
     loaded.matches = true;
-    cache.matches = mergeById(...pageLists, pinnedMatches);
+    cache.matches = merged.map(normalizeMatch);
     renderFixturesPanel();
     renderResultsPanel();
   } catch (err) {
@@ -378,13 +303,12 @@ function renderFixturesPanel() {
   const box = $('#fixtures-content');
   const all = cache.matches || [];
   const upcoming = all
-    .filter((m) => (m._pinned ? pinnedMatchIsUpcoming(m) : !pick(m, ['matchStarted'])))
+    .filter((m) => !m.matchStarted)
     .filter(matchPassesFilter)
-    .sort((a, b) => new Date(pick(a, ['dateTimeGMT', 'date'])) - new Date(pick(b, ['dateTimeGMT', 'date'])));
+    .sort((a, b) => new Date(pick(a, ['dateTimeGMT'])) - new Date(pick(b, ['dateTimeGMT'])));
 
   // Always surface England Men's fixtures first, regardless of date — but
-  // only when no more specific filter is already narrowing the list (if
-  // you've filtered to e.g. "India", pinning England Men wouldn't make sense).
+  // only when no more specific filter is already narrowing the list.
   let ordered = upcoming;
   let pinnedCount = 0;
   if (activeFilter === 'all') {
@@ -406,9 +330,9 @@ function renderResultsPanel() {
   const box = $('#results-content');
   const all = cache.matches || [];
   const finished = all
-    .filter((m) => (m._pinned ? pinnedMatchIsFinished(m) : (pick(m, ['matchEnded']) || (pick(m, ['matchStarted']) && /won|draw|tied|abandon/i.test(pick(m, ['status'], ''))))))
+    .filter((m) => m.matchEnded)
     .filter(matchPassesFilter)
-    .sort((a, b) => new Date(pick(b, ['dateTimeGMT', 'date'])) - new Date(pick(a, ['dateTimeGMT', 'date'])));
+    .sort((a, b) => new Date(pick(b, ['dateTimeGMT'])) - new Date(pick(a, ['dateTimeGMT'])));
 
   box.innerHTML = '';
   if (!finished.length) {
@@ -420,9 +344,8 @@ function renderResultsPanel() {
 
 function renderFixtureCard(match, isResult, isPinned = false) {
   const name = pick(match, ['name'], (match.teams || []).join(' vs '));
-  const venue = pick(match, ['venue'], '');
   const matchType = pick(match, ['matchType'], '');
-  const dateStr = pick(match, ['dateTimeGMT', 'date'], '');
+  const dateStr = pick(match, ['dateTimeGMT'], '');
   const status = pick(match, ['status'], '');
   let dateLabel = '';
   if (dateStr) {
@@ -434,7 +357,7 @@ function renderFixtureCard(match, isResult, isPinned = false) {
     <div class="fixture-card ${isResult ? 'result' : ''}" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(name)}">
       <div>
         <div class="fixture-teams">${escapeHtml(name)}${isPinned ? '<span class="pinned-tag">Pinned</span>' : ''}</div>
-        <div class="fixture-meta">${escapeHtml([matchType, venue].filter(Boolean).join(' · '))}</div>
+        <div class="fixture-meta">${escapeHtml(matchType || '')}</div>
         ${isResult ? `<div class="result-line">${escapeHtml(status)}</div>` : ''}
       </div>
       <div class="fixture-date">${escapeHtml(dateLabel)}</div>
@@ -461,45 +384,54 @@ async function openScorecard(matchId) {
   const box = $('#scorecard-content');
   box.innerHTML = '<p class="hint">Loading scorecard…</p>';
   try {
-    const result = await callApi('match_scorecard', { id: matchId });
-    if (!result || !result.data) {
-      box.innerHTML = '<p class="hint">No scorecard details are available yet for this match. This can happen just before play starts, or if cricketdata.org hasn\'t published ball-by-ball data for it — try again in a few minutes.</p>';
+    const result = await callApi(`matches/${matchId}`);
+    // Highlightly wraps a single match-detail result in an array.
+    const data = Array.isArray(result) ? result[0] : (result.data ? result.data[0] || result.data : result);
+    if (!data) {
+      box.innerHTML = '<p class="hint">No scorecard details are available for this match.</p>';
       return;
     }
-    box.innerHTML = renderScorecard(result.data);
+    box.innerHTML = renderScorecard(data);
   } catch (err) {
     box.innerHTML = `<p class="error-msg">Couldn't load this scorecard: ${escapeHtml(err.message)}</p>`;
   }
 }
 
 function renderScorecard(data) {
-  const name = pick(data, ['name'], 'Match scorecard');
-  const status = pick(data, ['status'], '');
-  const innings = data.scorecard || data.scoreCard || [];
+  const home = data.homeTeam || {};
+  const away = data.awayTeam || {};
+  const teams = [home.name, away.name].filter(Boolean);
+  const name = teams.join(' vs ') + (data.league ? `, ${data.league.name}` : '');
+  const status = pick(data, ['state.report'], pick(data, ['state.description'], ''));
+  const innings = data.statistics || [];
 
   if (!innings.length) {
     return `
       <h2 style="font-family:var(--font-display); margin-top:0;">${escapeHtml(name)}</h2>
       <p class="hint">${escapeHtml(status)}</p>
-      <p class="hint">Detailed ball-by-ball scorecard isn't available for this match yet (it may not have started, or this data isn't included on the current plan).</p>
+      <p class="hint">Detailed scorecard isn't available for this match yet.</p>
     `;
   }
 
   const inningsHtml = innings.map((inn) => {
-    const title = pick(inn, ['inning'], 'Innings');
-    const batting = inn.batting || [];
-    const bowling = inn.bowling || [];
+    const title = pick(inn, ['name'], pick(inn, ['team.name'], 'Innings'));
+    const batting = (inn.inningBatsmen || []).filter((b) => (b.runs !== null && b.runs !== undefined) || b.dismissalStatus);
+    const bowling = (inn.inningBowlers || []).filter((b) => b.overs !== null && b.overs !== undefined);
 
     const battingRows = batting.map((b) => {
-      const bname = pick(b, ['batsman.name', 'batsman', 'name'], 'Unknown');
-      const dismissal = pick(b, ['dismissal-text', 'dismissal', 'dismissal_text'], b['dismissal-text'] === '' ? 'not out' : '');
-      const r = pick(b, ['r', 'runs'], 0);
-      const bballs = pick(b, ['b', 'balls'], 0);
-      const fours = pick(b, ['4s', 'fours'], 0);
-      const sixes = pick(b, ['6s', 'sixes'], 0);
-      const sr = pick(b, ['sr', 'strikeRate'], '-');
+      const bname = pick(b, ['player.name'], 'Unknown');
+      const dismissalStatus = pick(b, ['dismissalStatus'], '');
+      const fielders = (b.dismissalFielders || []).map((f) => f.name).filter(Boolean).join(', ');
+      const dismissal = dismissalStatus === 'not out' || !dismissalStatus
+        ? 'not out'
+        : `${dismissalStatus}${fielders ? ` (${fielders})` : ''}`;
+      const r = pick(b, ['runs'], 0);
+      const bballs = pick(b, ['balls'], 0);
+      const fours = pick(b, ['fours'], 0);
+      const sixes = pick(b, ['sixes'], 0);
+      const sr = pick(b, ['battingStrikeRate'], '-');
       return `<tr>
-        <td>${escapeHtml(bname)}<div class="dismissal">${escapeHtml(dismissal || 'not out')}</div></td>
+        <td>${escapeHtml(bname)}<div class="dismissal">${escapeHtml(dismissal)}</div></td>
         <td class="num">${escapeHtml(r)}</td>
         <td class="num">${escapeHtml(bballs)}</td>
         <td class="num">${escapeHtml(fours)}</td>
@@ -509,12 +441,12 @@ function renderScorecard(data) {
     }).join('');
 
     const bowlingRows = bowling.map((bw) => {
-      const wname = pick(bw, ['bowler.name', 'bowler', 'name'], 'Unknown');
-      const o = pick(bw, ['o', 'overs'], 0);
-      const m = pick(bw, ['m', 'maidens'], 0);
-      const r = pick(bw, ['r', 'runs'], 0);
-      const w = pick(bw, ['w', 'wickets'], 0);
-      const eco = pick(bw, ['eco', 'economy'], '-');
+      const wname = pick(bw, ['player.name'], 'Unknown');
+      const o = pick(bw, ['overs'], 0);
+      const m = pick(bw, ['maidens'], 0);
+      const r = pick(bw, ['concededRuns'], 0);
+      const w = pick(bw, ['wickets'], 0);
+      const eco = pick(bw, ['economy'], '-');
       return `<tr>
         <td>${escapeHtml(wname)}</td>
         <td class="num">${escapeHtml(o)}</td>
@@ -555,17 +487,18 @@ $('#player-search-form').addEventListener('submit', async (e) => {
   const box = $('#players-content');
   box.innerHTML = '<p class="hint">Searching…</p>';
   try {
-    const { data } = await callApi('players_info', { search: q });
+    const { data } = await callApi('players', { name: q });
     if (!data || !data.length) {
       box.innerHTML = '<p class="hint">No players found. Try a different spelling.</p>';
       return;
     }
     box.innerHTML = '';
     data.slice(0, 15).forEach((p) => {
+      const currentTeam = (p.teams || []).find((t) => t.isCurrent) || (p.teams || [])[0];
       const node = el(`
         <div class="player-card" tabindex="0" role="button">
-          <span class="player-name">${escapeHtml(pick(p, ['name'], 'Unknown'))}</span>
-          <span class="player-country">${escapeHtml(pick(p, ['country'], ''))}</span>
+          <span class="player-name">${escapeHtml(pick(p, ['longName'], 'Unknown'))}</span>
+          <span class="player-country">${escapeHtml(currentTeam ? currentTeam.abbreviation : '')}</span>
         </div>
       `);
       const id = pick(p, ['id']);
@@ -581,27 +514,39 @@ async function openPlayer(playerId) {
   const box = $('#players-content');
   box.innerHTML = '<p class="hint">Loading player…</p>';
   try {
-    const { data } = await callApi('playerStats', { id: playerId });
-    const name = pick(data, ['name'], 'Player');
-    const country = pick(data, ['country'], '');
-    const role = pick(data, ['role'], '');
-    const stats = data.stats || [];
+    const result = await callApi(`players/${playerId}`);
+    const data = Array.isArray(result) ? result[0] : result;
+    if (!data) {
+      box.innerHTML = '<p class="hint">Couldn\'t find that player.</p>';
+      return;
+    }
+    const name = pick(data, ['longName'], 'Player');
+    const battingStyle = (data.longBattingStyles || [])[0] || '';
+    const bowlingStyle = (data.longBowlingStyles || [])[0] || '';
+    const summary = data.summary || [];
 
-    const statBoxes = stats.map((s) => {
-      const label = [pick(s, ['fn']), pick(s, ['matchtype'])].filter(Boolean).join(' · ');
-      const bits = Object.entries(s).filter(([k]) => !['fn', 'matchtype'].includes(k));
+    // Show the most recent year on record for each format, as a snapshot —
+    // full year-by-year detail is in the API but would be a lot to list here.
+    const formatBoxes = summary.map((fmt) => {
+      const battingYears = fmt.batting || [];
+      const bowlingYears = fmt.bowling || [];
+      const latestBatting = battingYears[battingYears.length - 1];
+      const latestBowling = bowlingYears[bowlingYears.length - 1];
+      const battingStats = latestBatting ? (latestBatting.statistics || []).map((s) => `${s.displayName}: ${s.value}`).join(' · ') : '';
+      const bowlingStats = latestBowling ? (latestBowling.statistics || []).map((s) => `${s.displayName}: ${s.value}`).join(' · ') : '';
       return `<div class="stat-box">
-        <div class="label">${escapeHtml(label || 'Stats')}</div>
-        ${bits.map(([k, v]) => `<div class="value" style="font-size:.95rem;">${escapeHtml(k)}: ${escapeHtml(v)}</div>`).join('')}
+        <div class="label">${escapeHtml(fmt.format || 'Format')}${latestBatting ? ` · ${escapeHtml(latestBatting.year)}` : ''}</div>
+        ${battingStats ? `<div class="value" style="font-size:.85rem; line-height:1.5;">${escapeHtml(battingStats)}</div>` : ''}
+        ${bowlingStats ? `<div class="value" style="font-size:.85rem; line-height:1.5; color:var(--cream-dim);">${escapeHtml(bowlingStats)}</div>` : ''}
       </div>`;
     }).join('');
 
     box.innerHTML = `
       <div class="player-card" style="cursor:default;">
         <span class="player-name">${escapeHtml(name)}</span>
-        <span class="player-country">${escapeHtml([country, role].filter(Boolean).join(' · '))}</span>
+        <span class="player-country">${escapeHtml([battingStyle, bowlingStyle].filter(Boolean).join(' · '))}</span>
       </div>
-      ${stats.length ? `<div class="stat-grid">${statBoxes}</div>` : '<p class="hint">No detailed stats available for this player on the current plan.</p>'}
+      ${summary.length ? `<div class="stat-grid">${formatBoxes}</div>` : '<p class="hint">No detailed stats available for this player.</p>'}
       <p style="margin-top:16px;"><button class="refresh-btn" id="back-to-search">← New search</button></p>
     `;
     $('#back-to-search').addEventListener('click', () => { box.innerHTML = ''; $('#player-search-input').value = ''; $('#player-search-input').focus(); });

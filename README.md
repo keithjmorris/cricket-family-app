@@ -1,12 +1,11 @@
 # Boundary — Family Cricket Board
 
 A simple cricket dashboard for the family: live scores, fixtures, results, and
-player batting/bowling stats, powered by the free tier of
-[cricketdata.org](https://cricketdata.org).
+player batting/bowling stats, powered by the [Highlightly Cricket API](https://highlightly.net/cricket-api/).
 
 - **Frontend:** plain HTML/CSS/JS (no build step, no framework)
 - **Backend:** one Vercel serverless function (`/api/cricket.js`) that holds
-  the API key and proxies requests to cricketdata.org
+  the API key and proxies requests to Highlightly
 - **Hosting:** Vercel
 - **Repo:** GitHub
 
@@ -15,14 +14,17 @@ if you want the reasoning.
 
 ---
 
-## 1. Get a free API key
+## 1. Get an API key
 
-1. Sign up at [cricketdata.org/member.aspx](https://cricketdata.org/member.aspx) (free, no card needed).
-2. Copy your API key from your member area.
-3. The free tier gives you **100 requests/day**. This project caches
-   responses at Vercel's edge (60s for live scores, 5 minutes for fixtures/
-   results, 1 hour for player data) specifically to stay well inside that
-   limit even with several family members using it at once.
+Sign up at [highlightly.net](https://highlightly.net) (or via RapidAPI, if
+that's where you subscribed) and grab your key from the dashboard.
+
+This project was built and switched over to Highlightly's paid tier
+(7,500 requests/day) after cricketdata.org's free tier turned out to have
+gaps in its coverage of major England series specifically. Live polling and
+caching lifetimes in this project (see `api/cricket.js` and `app.js`) are
+tuned around that 7,500/day budget — if you're on a smaller plan, those
+numbers are worth turning down.
 
 ## 2. Open the project in VS Code
 
@@ -37,16 +39,13 @@ cp .env.example .env
 Open `.env` and paste your real key in place of `your_key_here`:
 
 ```
-CRICKET_API_KEY=abcd1234-your-real-key
+HIGHLIGHTLY_API_KEY=your-real-key
 ```
 
 `.env` is already listed in `.gitignore`, so it will never be committed to
 GitHub — only `.env.example` (which has no real key in it) gets checked in.
 
 ## 4. Run it locally
-
-This project uses Vercel's own local dev server, since it needs to run the
-serverless function as well as serve the static files.
 
 ```bash
 npm install -g vercel   # one-time, if you don't have it already
@@ -55,10 +54,6 @@ vercel dev
 
 Follow the prompts (link or create a Vercel project when asked). Then open
 the local URL it gives you (typically `http://localhost:3000`).
-
-If a match happens to be live when you test, check the Live tab. Otherwise
-try Fixtures, Results, and searching a well-known player name in Players —
-all of those work regardless of whether anything is live right now.
 
 ## 5. Push to GitHub
 
@@ -82,7 +77,7 @@ git push -u origin main
    and import your GitHub repo.
 2. Before the first deploy, add the environment variable: **Settings → 
    Environment Variables** →
-   - Name: `CRICKET_API_KEY`
+   - Name: `HIGHLIGHTLY_API_KEY`
    - Value: your real key
    - Environment: Production (and Preview, if you want preview deploys to
      work too)
@@ -100,25 +95,31 @@ Update it in **Vercel → Settings → Environment Variables**, and in your loca
 
 ## Why a serverless function, not just a static site?
 
-If the HTML/JS called cricketdata.org directly from the browser, the API key
+If the HTML/JS called Highlightly directly from the browser, the API key
 would have to be embedded in that JavaScript — and anyone in the family (or
 anyone who found the link) could open browser dev tools and read it straight
 out of the page. `/api/cricket.js` runs on Vercel's servers instead, reads
 the key from the environment variable there, and is the only thing that ever
-talks to cricketdata.org. The browser only ever talks to your own `/api`
+talks to Highlightly. The browser only ever talks to your own `/api`
 endpoint.
 
-## A note on the scorecard view
+## How this differs from the previous cricketdata.org version
 
-The batting/bowling scorecard rendering (`renderScorecard` in `app.js`) is
-built against cricketdata.org's documented response shape, but the exact
-field names in their JSON have shifted slightly across API versions in the
-past. It's written defensively (it tries a few likely field names before
-giving up), but once you have a real key, it's worth opening a live match's
-scorecard and checking it renders as expected. If a field's ever blank where
-you'd expect a number, open browser dev tools → Network tab → find the
-`match_scorecard` request → look at the raw JSON, and I can adjust the
-matching field name in a couple of lines.
+- **Auth:** Highlightly uses a header (`x-rapidapi-key`), not a URL query
+  parameter — so the proxy passes a `path` parameter (e.g.
+  `path=matches&date=2026-07-19`) and attaches the header server-side.
+- **No "pinned series" workaround needed:** cricketdata.org's `matches`
+  endpoint returned a huge, oddly-ordered global list that could bury a
+  specific match on a page never fetched — that's what caused most of the
+  England-v-India headaches. Highlightly's `/matches` endpoint is queried
+  by date instead, so Fixtures/Results sweep a fixed date window
+  (`FIXTURES_DAYS_PAST`/`FIXTURES_DAYS_FUTURE` in `app.js`) and nothing gets
+  missed by ordering.
+- **Live tab** is built from today's + yesterday's date (Highlightly has no
+  single "currently live" endpoint) rather than a dedicated live feed.
+- **Scorecard detail** comes from `/matches/{id}`, which — unlike
+  cricketdata.org's `match_scorecard` — actually has real batting/bowling
+  data for England's international matches.
 
 ## Project structure
 
@@ -128,6 +129,8 @@ matching field name in a couple of lines.
 ├── index.html            ← page shell + tabs
 ├── style.css              ← "pavilion scoreboard" visual theme
 ├── app.js                 ← all frontend fetch/render logic
+├── manifest.webmanifest    ← app icon metadata for home-screen installs
+├── icon-192.png / icon-512.png
 ├── .env.example            ← template — copy to .env, add your real key
 ├── .gitignore
 └── package.json
