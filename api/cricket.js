@@ -9,6 +9,7 @@
 // for arbitrary URLs by anyone who finds it.
 const ALLOWED_ENDPOINTS = new Set([
   'currentMatches',   // live / recently live matches
+  'cricScore',        // lightweight live score ticker — has a reliable "ms":"live" flag
   'matches',          // fixtures + results (filtered on the frontend by date/status)
   'match_scorecard',  // full batting + bowling scorecard for one match
   'players_info',     // search for a player by name
@@ -20,6 +21,7 @@ const ALLOWED_ENDPOINTS = new Set([
 // These are Vercel Edge cache lifetimes in seconds, not browser cache.
 const CACHE_SECONDS = {
   currentMatches: 60,
+  cricScore: 60,
   matches: 1200,
   match_scorecard: 60,
   players_info: 3600,

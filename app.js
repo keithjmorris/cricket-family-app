@@ -193,20 +193,56 @@ function mergeById(...lists) {
   return merged;
 }
 
+// `cricScore` uses a different, more compact shape than currentMatches
+// (t1/t2 team names, t1s/t2s score strings, and an "ms" field). We only
+// trust ms === 'live' from it — the other possible values aren't confirmed,
+// and guessing wrong is exactly what went wrong with series_info earlier.
+function cleanTeamName(name) {
+  return String(name || '').replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+}
+function parseScoreString(s) {
+  const match = String(s || '').match(/(\d+)\s*\/\s*(\d+)\s*\(([\d.]+)/);
+  if (!match) return null;
+  return { r: match[1], w: match[2], o: match[3] };
+}
+function normalizeCricScoreMatch(m) {
+  const t1 = cleanTeamName(m.t1);
+  const t2 = cleanTeamName(m.t2);
+  const s1 = parseScoreString(m.t1s);
+  const s2 = parseScoreString(m.t2s);
+  const score = [];
+  if (s1) score.push({ inning: t1, ...s1 });
+  if (s2) score.push({ inning: t2, ...s2 });
+  return {
+    id: m.id,
+    name: [t1, t2].filter(Boolean).join(' vs ') + (m.series ? `, ${m.series}` : ''),
+    teams: [t1, t2],
+    matchType: m.matchType,
+    dateTimeGMT: m.dateTimeGMT,
+    status: 'Live',
+    score,
+    matchStarted: true,
+    matchEnded: false,
+  };
+}
+
 /* ---------------- Live ----------------
-   Deliberately relies ONLY on currentMatches. An earlier version also
-   merged in pinned-series matches here, but series_info's status flags
-   turned out not to reflect real live state (a finished match could still
-   read "Match starts at..."), which produced wrong Live/Ended tags, blank
-   scores, and scorecard errors. currentMatches is cricketdata.org's actual
-   live-tracking endpoint, so it's the only trustworthy source for this tab. */
+   Uses currentMatches as the primary source, plus cricScore as a second
+   check — cricScore's "ms":"live" flag has caught matches currentMatches
+   itself was missing (this is how the England v India ODI was found). */
 async function loadLive(forceFresh = false) {
   const box = $('#live-content');
   if (!cache.live || forceFresh) box.innerHTML = '<p class="hint">Loading live matches…</p>';
   try {
-    const { data } = await callApi('currentMatches');
+    const [currentResult, scoreResult] = await Promise.all([
+      callApi('currentMatches'),
+      callApi('cricScore').catch(() => ({ data: [] })),
+    ]);
+    const trulyLiveFromScore = (scoreResult.data || [])
+      .filter((m) => m.ms === 'live')
+      .map(normalizeCricScoreMatch);
     loaded.live = true;
-    cache.live = data || [];
+    cache.live = mergeById(currentResult.data, trulyLiveFromScore);
     renderLivePanel();
   } catch (err) {
     box.innerHTML = `<p class="error-msg">Couldn't load live scores: ${escapeHtml(err.message)}</p>`;
