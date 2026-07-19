@@ -181,12 +181,17 @@ function pinnedMatchIsFinished(match) {
 
 function mergeById(...lists) {
   const merged = [];
-  const seenIds = new Set();
+  const seenKeys = new Set();
   for (const list of lists) {
     for (const m of list || []) {
-      const id = pick(m, ['id']);
-      if (id && seenIds.has(id)) continue;
-      if (id) seenIds.add(id);
+      // Different endpoints have shown different internal IDs for the same
+      // real match, so ID alone isn't a safe dedupe key — team names + date
+      // (day-level) identifies "the same match" far more reliably here.
+      const teamKey = teamNames(m).map((t) => t.toLowerCase().trim()).sort().join('|');
+      const dateKey = String(pick(m, ['dateTimeGMT', 'date'], '')).slice(0, 10);
+      const key = teamKey ? `${teamKey}::${dateKey}` : pick(m, ['id'], JSON.stringify(m));
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
       merged.push(m);
     }
   }
@@ -421,8 +426,12 @@ async function openScorecard(matchId) {
   const box = $('#scorecard-content');
   box.innerHTML = '<p class="hint">Loading scorecard…</p>';
   try {
-    const { data } = await callApi('match_scorecard', { id: matchId });
-    box.innerHTML = renderScorecard(data);
+    const result = await callApi('match_scorecard', { id: matchId });
+    if (!result || !result.data) {
+      box.innerHTML = '<p class="hint">No scorecard details are available yet for this match. This can happen just before play starts, or if cricketdata.org hasn\'t published ball-by-ball data for it — try again in a few minutes.</p>';
+      return;
+    }
+    box.innerHTML = renderScorecard(result.data);
   } catch (err) {
     box.innerHTML = `<p class="error-msg">Couldn't load this scorecard: ${escapeHtml(err.message)}</p>`;
   }
