@@ -405,7 +405,55 @@ function renderScorecard(data) {
   const status = pick(data, ['state.report'], pick(data, ['state.description'], ''));
   const innings = data.statistics || [];
 
-  if (!innings.length) {
+  // Highlightly's `inplayData` covers the batters/bowlers currently active
+  // in a live innings — the main `statistics` breakdown below only seems
+  // to fill in properly once a player is out or an innings has finished,
+  // so without this, a fast-moving live match can look nearly empty.
+  const inplay = data.inplayData || {};
+  const inplayBatsmen = inplay.batsmen || [];
+  const inplayBowlers = inplay.bowlers || [];
+
+  let inplayHtml = '';
+  if (inplayBatsmen.length || inplayBowlers.length) {
+    const batRows = inplayBatsmen.map((b) => {
+      const bname = pick(b, ['player.name'], 'Unknown');
+      const s = b.statistics || {};
+      return `<tr>
+        <td>${escapeHtml(bname)}</td>
+        <td class="num">${escapeHtml(pick(s, ['runs'], 0))}</td>
+        <td class="num">${escapeHtml(pick(s, ['balls'], 0))}</td>
+        <td class="num">${escapeHtml(pick(s, ['fours'], 0))}</td>
+        <td class="num">${escapeHtml(pick(s, ['sixes'], 0))}</td>
+        <td class="num">${escapeHtml(pick(s, ['strikeRate'], '-'))}</td>
+      </tr>`;
+    }).join('');
+    const bowlRows = inplayBowlers.map((bw) => {
+      const wname = pick(bw, ['player.name'], 'Unknown');
+      const s = bw.statistics || {};
+      return `<tr>
+        <td>${escapeHtml(wname)}</td>
+        <td class="num">${escapeHtml(pick(s, ['overs'], 0))}</td>
+        <td class="num">${escapeHtml(pick(s, ['runsConceded'], 0))}</td>
+        <td class="num">${escapeHtml(pick(s, ['wickets'], 0))}</td>
+        <td class="num">${escapeHtml(pick(s, ['economy'], '-'))}</td>
+      </tr>`;
+    }).join('');
+    inplayHtml = `
+      <div class="innings-title">At the crease now</div>
+      ${batRows ? `
+      <table class="linescore">
+        <thead><tr><th>Batter</th><th class="num">R</th><th class="num">B</th><th class="num">4s</th><th class="num">6s</th><th class="num">SR</th></tr></thead>
+        <tbody>${batRows}</tbody>
+      </table>` : ''}
+      ${bowlRows ? `
+      <table class="linescore" style="margin-top:12px;">
+        <thead><tr><th>Bowler</th><th class="num">O</th><th class="num">R</th><th class="num">W</th><th class="num">Econ</th></tr></thead>
+        <tbody>${bowlRows}</tbody>
+      </table>` : ''}
+    `;
+  }
+
+  if (!innings.length && !inplayHtml) {
     return `
       <h2 style="font-family:var(--font-display); margin-top:0;">${escapeHtml(name)}</h2>
       <p class="hint">${escapeHtml(status)}</p>
@@ -475,6 +523,7 @@ function renderScorecard(data) {
   return `
     <h2 style="font-family:var(--font-display); margin-top:0;">${escapeHtml(name)}</h2>
     <p class="hint">${escapeHtml(status)}</p>
+    ${inplayHtml}
     ${inningsHtml}
   `;
 }
