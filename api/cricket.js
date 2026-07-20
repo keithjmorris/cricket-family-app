@@ -25,7 +25,6 @@ const ALLOWED_ROOTS = new Set([
 // longer than Highlightly itself would refresh it, but also not re-fetching
 // more often than useful.
 const CACHE_SECONDS = {
-  matches: 20,          // live scores + scorecards — kept fresh; budget allows this on the paid tier
   teams: 3600,          // rarely changes
   players: 3600,        // "once a day" per their docs
   standings: 1800,      // "up to an hour after a match" per their docs
@@ -34,6 +33,20 @@ const CACHE_SECONDS = {
   leagues: 3600,
   countries: 86400,     // "once a day" per their docs, and essentially static
 };
+
+// `matches` is used for several very different things — a single flat
+// cache lifetime doesn't fit all of them. Today's live-tracking query needs
+// to stay fresh; a fixture that's already been published for next month
+// basically never changes until match day.
+function matchesCacheSeconds(cleanPath, params) {
+  const hasId = cleanPath.includes('/'); // e.g. matches/12345 → single match detail (scorecard)
+  if (hasId) return 30; // used for live scorecards — keep reasonably fresh
+  if (params.homeTeamName || params.awayTeamName) return 3600; // priority-team fixture sweep — rarely changes once published
+  const todayStr = new Date().toISOString().slice(0, 10);
+  if (params.date === todayStr) return 20; // today — this is the live-tracking query
+  if (params.date) return 1800; // any other date in the fixtures/results sweep
+  return 60; // fallback
+}
 
 export default async function handler(req, res) {
   const { path, ...params } = req.query;
@@ -75,7 +88,7 @@ export default async function handler(req, res) {
       return;
     }
 
-    const seconds = CACHE_SECONDS[rootSegment] ?? 60;
+    const seconds = rootSegment === 'matches' ? matchesCacheSeconds(cleanPath, params) : (CACHE_SECONDS[rootSegment] ?? 60);
     res.setHeader('Cache-Control', `s-maxage=${seconds}, stale-while-revalidate=${seconds * 3}`);
     res.status(200).json(data);
   } catch (err) {

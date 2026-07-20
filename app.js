@@ -280,7 +280,7 @@ function renderScoreboard(match, kind) {
    call per day, merges the results, and lets the existing team filters and
    upcoming/finished classification work exactly as they did before. */
 const FIXTURES_DAYS_PAST = 3;
-const FIXTURES_DAYS_FUTURE = 10;
+const FIXTURES_DAYS_FUTURE = 30;
 
 // Highlightly can be queried directly by team name, with no date limit —
 // "pass a date, a league, a country code, or a team name; a single
