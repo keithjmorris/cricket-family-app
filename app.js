@@ -417,7 +417,7 @@ function renderScorecard(data) {
   if (inplayBatsmen.length || inplayBowlers.length) {
     const batRows = inplayBatsmen.map((b) => {
       const bname = pick(b, ['player.name'], 'Unknown');
-      const s = b.statistics || {};
+      const s = (b.player && b.player.statistics) || {};
       return `<tr>
         <td>${escapeHtml(bname)}</td>
         <td class="num">${escapeHtml(pick(s, ['runs'], 0))}</td>
@@ -429,7 +429,7 @@ function renderScorecard(data) {
     }).join('');
     const bowlRows = inplayBowlers.map((bw) => {
       const wname = pick(bw, ['player.name'], 'Unknown');
-      const s = bw.statistics || {};
+      const s = (bw.player && bw.player.statistics) || {};
       return `<tr>
         <td>${escapeHtml(wname)}</td>
         <td class="num">${escapeHtml(pick(s, ['overs'], 0))}</td>
