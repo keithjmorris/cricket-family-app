@@ -282,6 +282,24 @@ function renderScoreboard(match, kind) {
 const FIXTURES_DAYS_PAST = 3;
 const FIXTURES_DAYS_FUTURE = 10;
 
+// Highlightly can be queried directly by team name, with no date limit —
+// "pass a date, a league, a country code, or a team name; a single
+// parameter is all you need" per their docs. That's a much better way to
+// guarantee England's fixtures show up months out than sweeping every date
+// between now and December (which would mean 100+ extra requests every
+// time Fixtures is opened). Both the men's and women's team names are
+// queried, as home AND away, so a full season shows regardless of venue.
+const PRIORITY_TEAM_NAMES = ['England', 'England Women'];
+
+async function fetchPriorityTeamMatches() {
+  const calls = PRIORITY_TEAM_NAMES.flatMap((name) => [
+    callApi('matches', { homeTeamName: name }).catch(() => ({ data: [] })),
+    callApi('matches', { awayTeamName: name }).catch(() => ({ data: [] })),
+  ]);
+  const results = await Promise.all(calls);
+  return mergeById(...results.map((r) => r.data || []));
+}
+
 async function loadMatches() {
   const fixturesBox = $('#fixtures-content');
   const resultsBox = $('#results-content');
@@ -290,8 +308,9 @@ async function loadMatches() {
   try {
     const offsets = [];
     for (let i = -FIXTURES_DAYS_PAST; i <= FIXTURES_DAYS_FUTURE; i++) offsets.push(i);
-    const pages = await Promise.all(offsets.map((offset) => callApi('matches', { date: todayISO(offset) })));
-    const merged = mergeById(...pages.map((p) => p.data || []));
+    const datePromises = offsets.map((offset) => callApi('matches', { date: todayISO(offset) }));
+    const [pages, priorityMatches] = await Promise.all([Promise.all(datePromises), fetchPriorityTeamMatches()]);
+    const merged = mergeById(...pages.map((p) => p.data || []), priorityMatches);
 
     loaded.matches = true;
     cache.matches = merged.map(normalizeMatch);
