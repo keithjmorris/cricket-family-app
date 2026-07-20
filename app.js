@@ -280,7 +280,15 @@ function renderScoreboard(match, kind) {
    call per day, merges the results, and lets the existing team filters and
    upcoming/finished classification work exactly as they did before. */
 const FIXTURES_DAYS_PAST = 3;
-const FIXTURES_DAYS_FUTURE = 30;
+
+// Reach through to the end of the current year, whatever today's date is —
+// keeps a floor of 30 days so this doesn't shrink to almost nothing in late
+// December.
+function daysUntilEndOfYear() {
+  const now = new Date();
+  const endOfYear = new Date(Date.UTC(now.getUTCFullYear(), 11, 31));
+  return Math.max(30, Math.ceil((endOfYear.getTime() - now.getTime()) / 86400000));
+}
 
 // Highlightly can be queried directly by team name, with no date limit —
 // "pass a date, a league, a country code, or a team name; a single
@@ -307,7 +315,7 @@ async function loadMatches() {
   if (!resultsBox.hidden) resultsBox.innerHTML = '<p class="hint">Loading results…</p>';
   try {
     const offsets = [];
-    for (let i = -FIXTURES_DAYS_PAST; i <= FIXTURES_DAYS_FUTURE; i++) offsets.push(i);
+    for (let i = -FIXTURES_DAYS_PAST; i <= daysUntilEndOfYear(); i++) offsets.push(i);
     const datePromises = offsets.map((offset) => callApi('matches', { date: todayISO(offset) }));
     const [pages, priorityMatches] = await Promise.all([Promise.all(datePromises), fetchPriorityTeamMatches()]);
     const merged = mergeById(...pages.map((p) => p.data || []), priorityMatches);

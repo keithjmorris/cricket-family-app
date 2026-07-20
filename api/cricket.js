@@ -38,13 +38,23 @@ const CACHE_SECONDS = {
 // cache lifetime doesn't fit all of them. Today's live-tracking query needs
 // to stay fresh; a fixture that's already been published for next month
 // basically never changes until match day.
+const ONE_MONTH = 30 * 24 * 3600;
+
 function matchesCacheSeconds(cleanPath, params) {
   const hasId = cleanPath.includes('/'); // e.g. matches/12345 → single match detail (scorecard)
   if (hasId) return 30; // used for live scorecards — keep reasonably fresh
-  if (params.homeTeamName || params.awayTeamName) return 3600; // priority-team fixture sweep — rarely changes once published
   const todayStr = new Date().toISOString().slice(0, 10);
   if (params.date === todayStr) return 20; // today — this is the live-tracking query
-  if (params.date) return 1800; // any other date in the fixtures/results sweep
+  if (params.date && params.date < todayStr) return 3600; // recent past — still settling into "Finished", keep an hour fresh
+  if (params.date) return ONE_MONTH; // genuinely future date — barely changes once published
+  // Priority-team sweep (homeTeamName/awayTeamName, no date filter): mixes
+  // past and future. Near-term entries here are duplicates of the
+  // date-based query above and get superseded by that fresher copy when
+  // merged client-side (mergeById keeps the first match it sees, and the
+  // date sweep is listed first) — so it's safe for this one to be long too;
+  // the only entries that actually rely on it are the far-future ones the
+  // date sweep doesn't reach.
+  if (params.homeTeamName || params.awayTeamName) return ONE_MONTH;
   return 60; // fallback
 }
 
