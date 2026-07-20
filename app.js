@@ -48,25 +48,30 @@ const cache = {
 };
 
 /* ---------------- Team filter ---------------- */
-let activeFilter = 'all'; // 'all' | 'england-men' | 'england-women' | free-text team search
+let activeFilter = 'all'; // 'all' | 'england' | free-text search (team OR competition/format)
 
 function teamNames(match) { return (match.teams || []).map(String); }
-function isEnglandMen(name) { return /england/i.test(name) && !/women/i.test(name); }
-function isEnglandWomen(name) { return /england/i.test(name) && /women/i.test(name); }
+function isEngland(name) { return /england/i.test(name); }
+
+// For the free-text box, search across team names, format (T20/ODI/Test),
+// and competition/league name (already folded into `name`, e.g.
+// "...vs..., The Hundred Men's Competition 2026") — so typing "IPL" or
+// "T20" or "The Hundred" all work, not just team names.
+function matchSearchHaystack(match) {
+  return [...(match.teams || []), match.matchType, match.name].filter(Boolean).join(' ').toLowerCase();
+}
 
 function matchPassesFilter(match) {
-  const teams = teamNames(match);
   if (activeFilter === 'all') return true;
-  if (activeFilter === 'england-men') return teams.some(isEnglandMen);
-  if (activeFilter === 'england-women') return teams.some(isEnglandWomen);
+  if (activeFilter === 'england') return teamNames(match).some(isEngland);
   const q = activeFilter.toLowerCase();
-  return teams.some((t) => t.toLowerCase().includes(q));
+  return matchSearchHaystack(match).includes(q);
 }
 
 function setActiveFilter(filter) {
   activeFilter = filter;
   $$('.filter-chip').forEach((chip) => chip.setAttribute('aria-pressed', String(chip.dataset.filter === filter)));
-  if (filter === 'all' || filter === 'england-men' || filter === 'england-women') {
+  if (filter === 'all' || filter === 'england') {
     $('#filter-search-input').value = '';
   }
   const activePanel = $('.panel:not([hidden])')?.dataset.panel;
@@ -307,13 +312,13 @@ function renderFixturesPanel() {
     .filter(matchPassesFilter)
     .sort((a, b) => new Date(pick(a, ['dateTimeGMT'])) - new Date(pick(b, ['dateTimeGMT'])));
 
-  // Always surface England Men's fixtures first, regardless of date — but
+  // Always surface England's fixtures first, regardless of date — but
   // only when no more specific filter is already narrowing the list.
   let ordered = upcoming;
   let pinnedCount = 0;
   if (activeFilter === 'all') {
-    const pinned = upcoming.filter((m) => teamNames(m).some(isEnglandMen));
-    const rest = upcoming.filter((m) => !teamNames(m).some(isEnglandMen));
+    const pinned = upcoming.filter((m) => teamNames(m).some(isEngland));
+    const rest = upcoming.filter((m) => !teamNames(m).some(isEngland));
     ordered = [...pinned, ...rest];
     pinnedCount = pinned.length;
   }

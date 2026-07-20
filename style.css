@@ -137,6 +137,10 @@ a { color: var(--grass-deep); }
   border-color: var(--grass);
   color: var(--cream);
 }
+.filter-search {
+  flex: 1 1 110px;
+  min-width: 90px;
+}
 .filter-search input {
   border: 1px solid var(--cream-dim);
   background: #fff;
@@ -144,7 +148,8 @@ a { color: var(--grass-deep); }
   padding: 7px 14px;
   font-family: var(--font-body);
   font-size: 0.85rem;
-  width: 140px;
+  width: 100%;
+  box-sizing: border-box;
 }
 .filter-search input:focus { outline: none; border-color: var(--grass); }
 .pinned-tag {
