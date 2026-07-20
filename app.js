@@ -463,8 +463,8 @@ function renderScorecard(data) {
 
   const inningsHtml = innings.map((inn) => {
     const title = pick(inn, ['name'], pick(inn, ['team.name'], 'Innings'));
-    const batting = (inn.inningBatsmen || []).filter((b) => (b.runs !== null && b.runs !== undefined) || b.dismissalStatus);
-    const bowling = (inn.inningBowlers || []).filter((b) => b.overs !== null && b.overs !== undefined);
+    const batting = ((inn.team && inn.team.inningBatsmen) || []).filter((b) => (b.runs !== null && b.runs !== undefined) || b.dismissalStatus);
+    const bowling = ((inn.team && inn.team.inningBowlers) || []).filter((b) => b.overs !== null && b.overs !== undefined);
 
     const battingRows = batting.map((b) => {
       const bname = pick(b, ['player.name'], 'Unknown');
