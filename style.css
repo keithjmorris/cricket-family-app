@@ -373,7 +373,7 @@ main {
   align-items: flex-start;
   justify-content: center;
   padding: 40px 16px;
-  overflow-y: auto;
+  overflow: hidden;
   z-index: 100;
 }
 .overlay[hidden] {
