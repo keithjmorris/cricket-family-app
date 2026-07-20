@@ -326,8 +326,18 @@ async function loadMatches() {
 function renderFixturesPanel() {
   const box = $('#fixtures-content');
   const all = cache.matches || [];
+  const now = Date.now();
   const upcoming = all
     .filter((m) => !m.matchStarted)
+    // Belt-and-braces: Highlightly occasionally has provisional/placeholder
+    // fixtures that aren't flagged as started but whose date has already
+    // passed (likely unconfirmed scheduling data) — a genuinely future
+    // date is required here too, not just the flag, to keep those out of
+    // "upcoming" and out of the sort order mess they'd otherwise cause.
+    .filter((m) => {
+      const d = new Date(pick(m, ['dateTimeGMT']));
+      return isNaN(d) || d.getTime() > now;
+    })
     .filter(matchPassesFilter)
     .sort((a, b) => new Date(pick(a, ['dateTimeGMT'])) - new Date(pick(b, ['dateTimeGMT'])));
 
@@ -374,7 +384,7 @@ function renderFixtureCard(match, isResult, isPinned = false) {
   let dateLabel = '';
   if (dateStr) {
     const d = new Date(dateStr);
-    if (!isNaN(d)) dateLabel = d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: isResult ? undefined : '2-digit', minute: isResult ? undefined : '2-digit' });
+    if (!isNaN(d)) dateLabel = d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: isResult ? undefined : '2-digit', minute: isResult ? undefined : '2-digit' });
   }
 
   const node = el(`
