@@ -601,6 +601,49 @@ $('#player-search-form').addEventListener('submit', async (e) => {
   }
 });
 
+// A "discipline" here means one of batting/bowling/fielding within a
+// format. Bowling entries that only ever contain Season + Matches (nothing
+// else) mean the player took no real bowling role that year — Highlightly
+// still includes a stub entry, so this filters those out rather than
+// showing an empty-looking "Bowling" heading with nothing under it.
+function yearHasRealStats(yearEntry) {
+  const stats = yearEntry.statistics || [];
+  return stats.some((s) => s.displayName !== 'Season' && s.displayName !== 'Matches');
+}
+
+function renderStatYear(yearEntry) {
+  const stats = (yearEntry.statistics || []).filter((s) => s.displayName !== 'Season');
+  const pairs = stats.map((s) => `<span class="year-stat"><strong>${escapeHtml(s.value)}</strong> ${escapeHtml(s.displayName)}</span>`).join('');
+  return `
+    <div class="year-block">
+      <div class="year-heading">${escapeHtml(yearEntry.year)}</div>
+      <div class="year-stats-row">${pairs}</div>
+    </div>
+  `;
+}
+
+function renderDiscipline(label, yearEntries) {
+  const withStats = (yearEntries || []).filter(yearHasRealStats).sort((a, b) => b.year - a.year);
+  if (!withStats.length) return '';
+  return `
+    <div class="discipline-label">${escapeHtml(label)}</div>
+    ${withStats.map(renderStatYear).join('')}
+  `;
+}
+
+function renderFormatBlock(fmt) {
+  const battingHtml = renderDiscipline('Batting', fmt.batting);
+  const bowlingHtml = renderDiscipline('Bowling', fmt.bowling);
+  const fieldingHtml = renderDiscipline('Fielding', fmt.fielding);
+  if (!battingHtml && !bowlingHtml && !fieldingHtml) return '';
+  return `
+    <div class="format-block">
+      <div class="format-heading">${escapeHtml(fmt.format || 'Format')}</div>
+      ${battingHtml}${bowlingHtml}${fieldingHtml}
+    </div>
+  `;
+}
+
 async function openPlayer(playerId) {
   const box = $('#players-content');
   box.innerHTML = '<p class="hint">Loading player…</p>';
@@ -616,28 +659,12 @@ async function openPlayer(playerId) {
     const bowlingStyle = (data.longBowlingStyles || [])[0] || '';
     const summary = data.summary || [];
 
-    // Show the most recent year on record for each format, as a snapshot —
-    // full year-by-year detail is in the API but would be a lot to list here.
-    const formatBoxes = summary.map((fmt) => {
-      const battingYears = fmt.batting || [];
-      const bowlingYears = fmt.bowling || [];
-      const latestBatting = battingYears[battingYears.length - 1];
-      const latestBowling = bowlingYears[bowlingYears.length - 1];
-      const battingStats = latestBatting ? (latestBatting.statistics || []).map((s) => `${s.displayName}: ${s.value}`).join(' · ') : '';
-      const bowlingStats = latestBowling ? (latestBowling.statistics || []).map((s) => `${s.displayName}: ${s.value}`).join(' · ') : '';
-      return `<div class="stat-box">
-        <div class="label">${escapeHtml(fmt.format || 'Format')}${latestBatting ? ` · ${escapeHtml(latestBatting.year)}` : ''}</div>
-        ${battingStats ? `<div class="value" style="font-size:.85rem; line-height:1.5;">${escapeHtml(battingStats)}</div>` : ''}
-        ${bowlingStats ? `<div class="value" style="font-size:.85rem; line-height:1.5; color:var(--cream-dim);">${escapeHtml(bowlingStats)}</div>` : ''}
-      </div>`;
-    }).join('');
-
     box.innerHTML = `
       <div class="player-card" style="cursor:default;">
         <span class="player-name">${escapeHtml(name)}</span>
         <span class="player-country">${escapeHtml([battingStyle, bowlingStyle].filter(Boolean).join(' · '))}</span>
       </div>
-      ${summary.length ? `<div class="stat-grid">${formatBoxes}</div>` : '<p class="hint">No detailed stats available for this player.</p>'}
+      ${summary.length ? summary.map(renderFormatBlock).join('') : '<p class="hint">No detailed stats available for this player.</p>'}
       <p style="margin-top:16px;"><button class="refresh-btn" id="back-to-search">← New search</button></p>
     `;
     $('#back-to-search').addEventListener('click', () => { box.innerHTML = ''; $('#player-search-input').value = ''; $('#player-search-input').focus(); });

@@ -369,6 +369,56 @@ main {
   margin-top: 4px;
 }
 
+/* ---------------- Player stats: format > year ---------------- */
+.format-block {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 2px solid var(--ink);
+}
+.format-block:first-of-type { border-top: none; margin-top: 18px; padding-top: 0; }
+.format-heading {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: var(--grass-deep);
+  margin-bottom: 10px;
+}
+.discipline-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--willow);
+  font-weight: 600;
+  margin: 14px 0 6px;
+}
+.year-block {
+  background: var(--board-bg);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 6px;
+}
+.year-heading {
+  font-family: var(--font-mono);
+  color: var(--amber);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.year-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.year-stat {
+  color: var(--cream-dim);
+  font-size: 0.8rem;
+}
+.year-stat strong {
+  color: var(--cream);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
 /* ---------------- Scorecard overlay ---------------- */
 .overlay {
   position: fixed;
