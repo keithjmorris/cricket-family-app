@@ -141,7 +141,7 @@ document.addEventListener('visibilitychange', () => {
    into a common shape the render functions below already know how to draw:
    { id, name, teams[], matchType, dateTimeGMT, status, score[],
      matchStarted, matchEnded }. */
-const LIVE_STATES = ['In play', 'Stumps', 'Lunch', 'Innings break', 'Drinks', 'Timeout', 'Tea'];
+const LIVE_STATES = ['In play', 'Stumps', 'Lunch', 'Innings break', 'Drinks', 'Timeout', 'Tea', 'Match delayed'];
 const FINISHED_STATES = ['Finished', 'Abandoned', 'Cancelled'];
 
 function parseHlTeamScore(scoreStr, infoStr) {
