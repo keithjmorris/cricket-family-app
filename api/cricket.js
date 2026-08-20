@@ -18,6 +18,7 @@ const ALLOWED_ROOTS = new Set([
   'head-2-head',
   'last-five-games',
   'leagues',
+  'highlights',    // video clips for a specific match
 ]);
 
 // Highlightly documents its own refresh intervals per endpoint — these
@@ -32,6 +33,7 @@ const CACHE_SECONDS = {
   'last-five-games': 300,
   leagues: 3600,
   countries: 86400,     // "once a day" per their docs, and essentially static
+  highlights: 1800,     // clips trickle in over 1-48h after a match — no need to poll often
 };
 
 // `matches` is used for several very different things — a single flat

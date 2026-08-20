@@ -465,6 +465,53 @@ main {
   margin: 22px 0 10px;
   color: var(--grass-deep);
 }
+.highlight-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+}
+.highlight-card {
+  flex: 0 0 140px;
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.highlight-thumb {
+  width: 140px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--board-bg);
+  display: block;
+}
+.highlight-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--amber);
+  font-size: 1.4rem;
+}
+.highlight-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 6px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.highlight-source {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b6353;
+  margin-top: 2px;
+}
 table.linescore {
   width: 100%;
   border-collapse: collapse;

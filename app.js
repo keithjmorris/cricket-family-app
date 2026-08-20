@@ -434,9 +434,48 @@ async function openScorecard(matchId) {
       return;
     }
     box.innerHTML = renderScorecard(data);
+    loadHighlightsForMatch(matchId); // fire-and-forget — fills in #highlights-section once ready
   } catch (err) {
     box.innerHTML = `<p class="error-msg">Couldn't load this scorecard: ${escapeHtml(err.message)}</p>`;
   }
+}
+
+// Clips typically appear 1-48h after a match finishes (some "unverified"
+// ones can show up mid-match) — so this simply shows nothing if there's
+// nothing yet, rather than treating an empty result as an error.
+async function loadHighlightsForMatch(matchId) {
+  const container = document.getElementById('highlights-section');
+  if (!container) return;
+  try {
+    const result = await callApi('highlights', { matchId, limit: 6 });
+    const clips = (result && result.data) || [];
+    if (!clips.length) return;
+    container.innerHTML = `
+      <div class="innings-title">Highlights</div>
+      <div class="highlight-row">${clips.map(renderHighlightCard).join('')}</div>
+    `;
+  } catch (err) {
+    // Quietly do nothing — a missing highlights section isn't worth an
+    // error message when the rest of the scorecard loaded fine.
+  }
+}
+
+function renderHighlightCard(clip) {
+  const title = pick(clip, ['title'], 'Highlight');
+  const source = pick(clip, ['source'], '');
+  const img = pick(clip, ['imgUrl'], '');
+  const link = pick(clip, ['url'], pick(clip, ['embedUrl'], ''));
+  const tag = link ? 'a' : 'div';
+  const hrefAttr = link ? `href="${escapeHtml(link)}" target="_blank" rel="noopener"` : '';
+  return `
+    <${tag} class="highlight-card" ${hrefAttr}>
+      ${img
+        ? `<img class="highlight-thumb" src="${escapeHtml(img)}" alt="" loading="lazy" />`
+        : '<div class="highlight-thumb highlight-thumb--empty">▶</div>'}
+      <div class="highlight-title">${escapeHtml(title)}</div>
+      ${source ? `<div class="highlight-source">${escapeHtml(source)}</div>` : ''}
+    </${tag}>
+  `;
 }
 
 function renderScorecard(data) {
@@ -565,6 +604,7 @@ function renderScorecard(data) {
   return `
     <h2 style="font-family:var(--font-display); margin-top:0;">${escapeHtml(name)}</h2>
     <p class="hint">${escapeHtml(status)}</p>
+    <div id="highlights-section"></div>
     ${inplayHtml}
     ${inningsHtml}
   `;
