@@ -202,15 +202,24 @@ function mergeById(...lists) {
    built from querying by date. Today's and yesterday's dates cover matches
    still running past midnight UTC (e.g. Tests, or a match that started late
    yesterday) without needing to sweep a wide range every poll. */
+// Highlightly's `date` filter appears to match on when a game STARTED, not
+// which dates it's actively spanning — so a 5-day Test that began several
+// days ago was quietly falling out of a "today + yesterday" search even
+// though it's still being played (confirmed: a match was visible on day 1,
+// then vanished from Live despite rain delays, not a finish). 6 days back
+// comfortably covers any current Test match. The extra older days are
+// cheap even polling every 20s — each is cached server-side for an hour,
+// so only "today" actually triggers a fresh upstream call each poll.
+const LIVE_DAYS_PAST = 6;
+
 async function loadLive(forceFresh = false) {
   const box = $('#live-content');
   if (!cache.live || forceFresh) box.innerHTML = '<p class="hint">Loading live matches…</p>';
   try {
-    const [today, yesterday] = await Promise.all([
-      callApi('matches', { date: todayISO(0) }),
-      callApi('matches', { date: todayISO(-1) }),
-    ]);
-    const merged = mergeById(today.data, yesterday.data);
+    const offsets = [];
+    for (let i = -LIVE_DAYS_PAST; i <= 0; i++) offsets.push(i);
+    const pages = await Promise.all(offsets.map((offset) => callApi('matches', { date: todayISO(offset) })));
+    const merged = mergeById(...pages.map((p) => p.data || []));
     loaded.live = true;
     cache.live = merged.map(normalizeMatch);
     renderLivePanel();
