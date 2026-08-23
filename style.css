@@ -397,6 +397,16 @@ main {
   padding: 10px 14px;
   margin-bottom: 6px;
 }
+.year-block--total {
+  border: 1px solid var(--amber-dim);
+  margin-bottom: 10px;
+}
+.year-block--total .year-heading {
+  color: var(--cream);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+}
 .year-heading {
   font-family: var(--font-mono);
   color: var(--amber);

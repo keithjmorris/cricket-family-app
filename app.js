@@ -660,6 +660,120 @@ function yearHasRealStats(yearEntry) {
   return stats.some((s) => s.displayName !== 'Season' && s.displayName !== 'Matches');
 }
 
+function statNum(yearEntry, displayName) {
+  const s = (yearEntry.statistics || []).find((s) => s.displayName === displayName);
+  if (!s) return null;
+  if (typeof s.value === 'number') return s.value;
+  const m = String(s.value).match(/-?\d+(\.\d+)?/); // strips a trailing "*" from things like "90*"
+  return m ? parseFloat(m[0]) : null;
+}
+
+function sumStat(years, displayName) {
+  return years.reduce((total, y) => {
+    const v = statNum(y, displayName);
+    return v !== null ? total + v : total;
+  }, 0);
+}
+
+// Cricket's "overs" notation isn't decimal — 6.3 overs means 6 overs and 3
+// balls (39 balls total), not 6.3 overs. These convert to/from a plain ball
+// count so overs from different years can actually be summed correctly.
+function oversToBalls(overs) {
+  const whole = Math.trunc(overs);
+  const frac = Math.round((overs - whole) * 10);
+  return whole * 6 + frac;
+}
+function ballsToOversLabel(balls) {
+  const whole = Math.floor(balls / 6);
+  const rem = balls % 6;
+  return rem === 0 ? String(whole) : `${whole}.${rem}`;
+}
+
+// Batting/bowling averages and strike rates are recomputed from the summed
+// totals, not averaged-across-years — an average of averages would be
+// mathematically wrong (it ignores how many innings each year represents).
+function aggregateBatting(years) {
+  const matches = sumStat(years, 'Matches');
+  const innings = sumStat(years, 'Innings');
+  const runs = sumStat(years, 'Runs');
+  const notOuts = sumStat(years, 'Not Outs');
+  const ballsFaced = sumStat(years, 'Balls Faced');
+
+  let highScore = null;
+  let highScoreNotOut = false;
+  years.forEach((y) => {
+    const s = (y.statistics || []).find((s) => s.displayName === 'High Score');
+    if (!s) return;
+    const raw = String(s.value);
+    const num = parseFloat(raw);
+    if (!isNaN(num) && (highScore === null || num > highScore)) {
+      highScore = num;
+      highScoreNotOut = raw.includes('*');
+    }
+  });
+
+  const timesOut = innings - notOuts;
+  const average = timesOut > 0 ? (runs / timesOut).toFixed(2) : '-';
+  const strikeRate = ballsFaced > 0 ? ((runs / ballsFaced) * 100).toFixed(2) : '-';
+
+  return {
+    Matches: matches, Innings: innings, Runs: runs,
+    Fours: sumStat(years, 'Fours'), Sixes: sumStat(years, 'Sixes'),
+    Fifties: sumStat(years, 'Fifties'), Hundreds: sumStat(years, 'Hundreds'),
+    'Balls Faced': ballsFaced, Ducks: sumStat(years, 'Ducks'), 'Not Outs': notOuts,
+    'High Score': highScore === null ? '-' : `${highScore}${highScoreNotOut ? '*' : ''}`,
+    'Batting Average': average, 'Strike Rate': strikeRate,
+  };
+}
+
+function aggregateBowling(years) {
+  const matches = sumStat(years, 'Matches');
+  const innings = sumStat(years, 'Innings');
+  const totalBalls = years.reduce((t, y) => {
+    const o = statNum(y, 'Overs');
+    return o !== null ? t + oversToBalls(o) : t;
+  }, 0);
+  const runsConceded = sumStat(years, 'Runs Conceded');
+  const wickets = sumStat(years, 'Wickets');
+
+  const bowlingAverage = wickets > 0 ? (runsConceded / wickets).toFixed(2) : '-';
+  const economyRate = totalBalls > 0 ? (runsConceded / (totalBalls / 6)).toFixed(2) : '-';
+  const bowlingStrikeRate = wickets > 0 ? (totalBalls / wickets).toFixed(2) : '-';
+
+  return {
+    Matches: matches, Innings: innings, Overs: ballsToOversLabel(totalBalls),
+    'Runs Conceded': runsConceded, Maidens: sumStat(years, 'Maidens'), Wickets: wickets,
+    'Four Wicket Hauls': sumStat(years, 'Four Wicket Hauls'),
+    'Five Wicket Hauls': sumStat(years, 'Five Wicket Hauls'),
+    'Ten Wicket Hauls': sumStat(years, 'Ten Wicket Hauls'),
+    'Bowling Average': bowlingAverage, 'Economy Rate': economyRate, 'Bowling Strike Rate': bowlingStrikeRate,
+  };
+}
+
+function aggregateFielding(years) {
+  const innings = sumStat(years, 'Innings');
+  const dismissals = sumStat(years, 'Dismissals');
+  return {
+    Matches: sumStat(years, 'Matches'), Innings: innings, Dismissals: dismissals,
+    Catches: sumStat(years, 'Catches'), Stumpings: sumStat(years, 'Stumpings'),
+    'Catches as Wicketkeeper': sumStat(years, 'Catches as Wicketkeeper'),
+    'Catches as Fielder': sumStat(years, 'Catches as Fielder'),
+    'Dismissals per Innings': innings > 0 ? (dismissals / innings).toFixed(3) : '-',
+  };
+}
+
+function renderAggregateBlock(statsObj, yearCount) {
+  const pairs = Object.entries(statsObj)
+    .map(([k, v]) => `<span class="year-stat"><strong>${escapeHtml(v)}</strong> ${escapeHtml(k)}</span>`)
+    .join('');
+  return `
+    <div class="year-block year-block--total">
+      <div class="year-heading">All seasons (${yearCount})</div>
+      <div class="year-stats-row">${pairs}</div>
+    </div>
+  `;
+}
+
 function renderStatYear(yearEntry) {
   const stats = (yearEntry.statistics || []).filter((s) => s.displayName !== 'Season');
   const pairs = stats.map((s) => `<span class="year-stat"><strong>${escapeHtml(s.value)}</strong> ${escapeHtml(s.displayName)}</span>`).join('');
@@ -674,8 +788,21 @@ function renderStatYear(yearEntry) {
 function renderDiscipline(label, yearEntries) {
   const withStats = (yearEntries || []).filter(yearHasRealStats).sort((a, b) => b.year - a.year);
   if (!withStats.length) return '';
+
+  // Only worth showing a career total when there's more than one season —
+  // for a single year it would just repeat that year's own numbers.
+  let aggregateHtml = '';
+  if (withStats.length > 1) {
+    const aggregate = label === 'Batting' ? aggregateBatting(withStats)
+      : label === 'Bowling' ? aggregateBowling(withStats)
+      : label === 'Fielding' ? aggregateFielding(withStats)
+      : null;
+    if (aggregate) aggregateHtml = renderAggregateBlock(aggregate, withStats.length);
+  }
+
   return `
     <div class="discipline-label">${escapeHtml(label)}</div>
+    ${aggregateHtml}
     ${withStats.map(renderStatYear).join('')}
   `;
 }
@@ -692,6 +819,7 @@ function renderFormatBlock(fmt) {
     </div>
   `;
 }
+
 
 async function openPlayer(playerId) {
   const box = $('#players-content');
