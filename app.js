@@ -487,6 +487,50 @@ function renderHighlightCard(clip) {
   `;
 }
 
+// Builds a per-innings total (runs, wickets, overs) from the same
+// batting/bowling data already used for the detailed tables below — rather
+// than trusting a separate summary field, this is derived from numbers we
+// already know are reliable. Overs are summed from the bowlers' figures
+// using proper cricket over notation (see oversToBalls/ballsToOversLabel).
+function summarizeInnings(inn) {
+  const team = inn.team || {};
+  const batsmen = team.inningBatsmen || [];
+  const extras = ['byes', 'legByes', 'wides', 'noBalls'].reduce((t, k) => t + (typeof team[k] === 'number' ? team[k] : 0), 0);
+  const battingRuns = batsmen.reduce((t, b) => t + (typeof b.runs === 'number' ? b.runs : 0), 0);
+  const wickets = (team.fallOfWickets || []).length;
+  const totalBalls = (team.inningBowlers || []).reduce((t, bw) => {
+    const o = typeof bw.overs === 'number' ? bw.overs : null;
+    return o !== null ? t + oversToBalls(o) : t;
+  }, 0);
+  return {
+    teamName: team.name || 'Innings',
+    runs: battingRuns + extras,
+    wickets,
+    oversLabel: totalBalls > 0 ? ballsToOversLabel(totalBalls) : null,
+  };
+}
+
+function renderInningsSummary(statisticsArr) {
+  if (!statisticsArr || statisticsArr.length < 2) return ''; // not worth a summary for a single-innings match still in progress
+  const seenCount = {};
+  const rows = statisticsArr.map((inn) => {
+    const s = summarizeInnings(inn);
+    seenCount[s.teamName] = (seenCount[s.teamName] || 0) + 1;
+    const n = seenCount[s.teamName];
+    const ordinal = n === 1 ? '1st' : n === 2 ? '2nd' : `${n}th`;
+    const wicketsLabel = s.wickets >= 10 ? 'all out' : `${s.wickets} wkt${s.wickets === 1 ? '' : 's'}`;
+    const oversPart = s.oversLabel ? ` · ${s.oversLabel} overs` : '';
+    return `<div class="board-row">
+      <span class="board-team">${escapeHtml(s.teamName)} ${ordinal} innings</span>
+      <span class="board-score">${escapeHtml(s.runs)} ${escapeHtml(wicketsLabel)}${oversPart}</span>
+    </div>`;
+  }).join('');
+  return `
+    <div class="innings-title" style="margin-top:0;">Match summary</div>
+    <div class="scoreboard" style="cursor:default;">${rows}</div>
+  `;
+}
+
 function renderScorecard(data) {
   const home = data.homeTeam || {};
   const away = data.awayTeam || {};
@@ -613,6 +657,7 @@ function renderScorecard(data) {
   return `
     <h2 style="font-family:var(--font-display); margin-top:0;">${escapeHtml(name)}</h2>
     <p class="hint">${escapeHtml(status)}</p>
+    ${renderInningsSummary(innings)}
     <div id="highlights-section"></div>
     ${inplayHtml}
     ${inningsHtml}
