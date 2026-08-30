@@ -519,10 +519,12 @@ function renderInningsSummary(statisticsArr) {
     const n = seenCount[s.teamName];
     const ordinal = n === 1 ? '1st' : n === 2 ? '2nd' : `${n}th`;
     const wicketsLabel = s.wickets >= 10 ? 'all out' : `${s.wickets} wkt${s.wickets === 1 ? '' : 's'}`;
-    const oversPart = s.oversLabel ? ` · ${s.oversLabel} overs` : '';
     return `<div class="board-row">
       <span class="board-team">${escapeHtml(s.teamName)} ${ordinal} innings</span>
-      <span class="board-score">${escapeHtml(s.runs)} ${escapeHtml(wicketsLabel)}${oversPart}</span>
+      <span class="board-score-stack">
+        <span class="board-score">${escapeHtml(s.runs)} ${escapeHtml(wicketsLabel)}</span>
+        ${s.oversLabel ? `<span class="board-overs">${escapeHtml(s.oversLabel)} overs</span>` : ''}
+      </span>
     </div>`;
   }).join('');
   return `

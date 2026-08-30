@@ -273,6 +273,17 @@ main {
   font-size: 0.82rem;
   font-style: italic;
 }
+.board-score-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.board-overs {
+  font-family: var(--font-mono);
+  color: var(--cream-dim);
+  font-size: 0.75rem;
+  margin-top: 2px;
+}
 
 /* ---------------- Fixture / result cards ---------------- */
 .fixture-card {
