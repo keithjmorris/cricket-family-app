@@ -487,43 +487,93 @@ function renderHighlightCard(clip) {
   `;
 }
 
-// Builds a per-innings total (runs, wickets, overs) from the same
-// batting/bowling data already used for the detailed tables below — rather
-// than trusting a separate summary field, this is derived from numbers we
-// already know are reliable. Overs are summed from the bowlers' figures
-// using proper cricket over notation (see oversToBalls/ballsToOversLabel).
-function summarizeInnings(inn) {
+// Confirmed with Highlightly support: the score string in `state.teams`
+// uses three forms — "450/6d" (declared), "263" (all out, no wicket count
+// at all), "84/0" (innings ended some other way — completed chase, draw,
+// or overs exhausted). Multiple innings for one team are joined with "&",
+// e.g. "183 & 298/8d". The field is free text, not structured, so
+// unusual values do appear — they've specifically seen "forfeit" turn up
+// in place of a score, hence the defensive checks below.
+function parseTeamScoreString(scoreStr) {
+  return String(scoreStr || '')
+    .split('&')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (/forfeit/i.test(part)) return { raw: part, forfeit: true };
+      const m = part.match(/^(\d+)(?:\/(\d+))?(d)?$/i);
+      if (!m) return { raw: part, unknown: true };
+      const runs = parseInt(m[1], 10);
+      const declared = !!m[3];
+      const wickets = m[2] !== undefined ? parseInt(m[2], 10) : 10; // no wicket count shown → all out
+      return { runs, wickets, declared, allOut: wickets >= 10 && !declared };
+    });
+}
+
+// Overs aren't included in `state` for anything but the current innings, so
+// they're still derived from the bowling figures already used elsewhere on
+// the scorecard — this part is unchanged from before.
+function inningsOversLabel(inn) {
+  const team = inn.team || {};
+  const totalBalls = (team.inningBowlers || []).reduce((t, bw) => {
+    const o = typeof bw.overs === 'number' ? bw.overs : null;
+    return o !== null ? t + oversToBalls(o) : t;
+  }, 0);
+  return totalBalls > 0 ? ballsToOversLabel(totalBalls) : null;
+}
+
+// Fallback used only if the raw score string is missing or doesn't match
+// the expected pattern — computed the same way as before, from the
+// batting/bowling data itself.
+function summarizeInningsFallback(inn) {
   const team = inn.team || {};
   const batsmen = team.inningBatsmen || [];
   const extras = ['byes', 'legByes', 'wides', 'noBalls'].reduce((t, k) => t + (typeof team[k] === 'number' ? team[k] : 0), 0);
   const battingRuns = batsmen.reduce((t, b) => t + (typeof b.runs === 'number' ? b.runs : 0), 0);
   const wickets = (team.fallOfWickets || []).length;
-  const totalBalls = (team.inningBowlers || []).reduce((t, bw) => {
-    const o = typeof bw.overs === 'number' ? bw.overs : null;
-    return o !== null ? t + oversToBalls(o) : t;
-  }, 0);
-  return {
-    teamName: team.name || 'Innings',
-    runs: battingRuns + extras,
-    wickets,
-    oversLabel: totalBalls > 0 ? ballsToOversLabel(totalBalls) : null,
-  };
+  return { runs: battingRuns + extras, wickets, declared: false, allOut: wickets >= 10 };
 }
 
-function renderInningsSummary(statisticsArr) {
-  if (!statisticsArr || statisticsArr.length < 2) return ''; // not worth a summary for a single-innings match still in progress
-  const seenCount = {};
+function scoreLabelFor(parsed, fallback) {
+  if (!parsed) {
+    const wicketsLabel = fallback.allOut ? 'all out' : `${fallback.wickets} wkt${fallback.wickets === 1 ? '' : 's'}`;
+    return `${fallback.runs} ${wicketsLabel}`;
+  }
+  if (parsed.forfeit) return 'Forfeited';
+  if (parsed.unknown) return parsed.raw; // show whatever unusual text Highlightly sent rather than guess at it
+  const wicketsLabel = parsed.declared ? `declared at ${parsed.wickets} wkt${parsed.wickets === 1 ? '' : 's'}`
+    : parsed.allOut ? 'all out'
+    : `${parsed.wickets} wkt${parsed.wickets === 1 ? '' : 's'}`;
+  return `${parsed.runs} ${wicketsLabel}`;
+}
+
+function renderInningsSummary(data) {
+  const statisticsArr = data.statistics || [];
+  if (statisticsArr.length < 2) return ''; // not worth a summary for a single-innings match still in progress
+
+  const home = data.homeTeam || {};
+  const away = data.awayTeam || {};
+  const stateTeams = (data.state && data.state.teams) || {};
+  const homeScores = parseTeamScoreString(stateTeams.home && stateTeams.home.score);
+  const awayScores = parseTeamScoreString(stateTeams.away && stateTeams.away.score);
+
+  const seenIndex = {}; // per-team counter, so each innings pairs with the right entry in that team's score string
   const rows = statisticsArr.map((inn) => {
-    const s = summarizeInnings(inn);
-    seenCount[s.teamName] = (seenCount[s.teamName] || 0) + 1;
-    const n = seenCount[s.teamName];
-    const ordinal = n === 1 ? '1st' : n === 2 ? '2nd' : `${n}th`;
-    const wicketsLabel = s.wickets >= 10 ? 'all out' : `${s.wickets} wkt${s.wickets === 1 ? '' : 's'}`;
+    const teamName = pick(inn, ['team.name'], 'Innings');
+    const idx = seenIndex[teamName] || 0;
+    seenIndex[teamName] = idx + 1;
+    const ordinal = idx === 0 ? '1st' : idx === 1 ? '2nd' : `${idx + 1}th`;
+
+    const scoresForTeam = teamName === home.name ? homeScores : teamName === away.name ? awayScores : [];
+    const parsed = scoresForTeam[idx];
+    const scoreLabel = scoreLabelFor(parsed, summarizeInningsFallback(inn));
+    const oversLabel = inningsOversLabel(inn);
+
     return `<div class="board-row">
-      <span class="board-team">${escapeHtml(s.teamName)} ${ordinal} innings</span>
+      <span class="board-team">${escapeHtml(teamName)} ${ordinal} innings</span>
       <span class="board-score-stack">
-        <span class="board-score">${escapeHtml(s.runs)} ${escapeHtml(wicketsLabel)}</span>
-        ${s.oversLabel ? `<span class="board-overs">${escapeHtml(s.oversLabel)} overs</span>` : ''}
+        <span class="board-score">${escapeHtml(scoreLabel)}</span>
+        ${oversLabel ? `<span class="board-overs">${escapeHtml(oversLabel)} overs</span>` : ''}
       </span>
     </div>`;
   }).join('');
@@ -659,7 +709,7 @@ function renderScorecard(data) {
   return `
     <h2 style="font-family:var(--font-display); margin-top:0;">${escapeHtml(name)}</h2>
     <p class="hint">${escapeHtml(status)}</p>
-    ${renderInningsSummary(innings)}
+    ${renderInningsSummary(data)}
     <div id="highlights-section"></div>
     ${inplayHtml}
     ${inningsHtml}

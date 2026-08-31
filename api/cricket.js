@@ -47,7 +47,17 @@ function matchesCacheSeconds(cleanPath, params) {
   if (hasId) return 30; // used for live scorecards — keep reasonably fresh
   const todayStr = new Date().toISOString().slice(0, 10);
   if (params.date === todayStr) return 20; // today — this is the live-tracking query
-  if (params.date && params.date < todayStr) return 3600; // recent past — still settling into "Finished", keep an hour fresh
+  if (params.date && params.date < todayStr) {
+    // A multi-day Test's data comes back tagged with its START date, which
+    // can be several days in the past — so "recent past" isn't necessarily
+    // settled/finished the way it is for shorter formats. This window
+    // mirrors LIVE_DAYS_PAST on the client (how far back Live searches for
+    // an ongoing match) and stays nearly as fresh as "today" for that
+    // reason. Only once a date falls outside that window do we treat it as
+    // genuinely settled and cache it for a full hour.
+    const daysAgo = Math.round((new Date(todayStr) - new Date(params.date)) / 86400000);
+    return daysAgo <= 7 ? 60 : 3600;
+  }
   if (params.date) return ONE_MONTH; // genuinely future date — barely changes once published
   // Priority-team sweep (homeTeamName/awayTeamName, no date filter): mixes
   // past and future. Near-term entries here are duplicates of the
