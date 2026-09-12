@@ -595,9 +595,24 @@ function renderScorecard(data) {
   // in a live innings — the main `statistics` breakdown below only seems
   // to fill in properly once a player is out or an innings has finished,
   // so without this, a fast-moving live match can look nearly empty.
+  //
+  // Each inplayData entry carries its own `player.inning` number, but until
+  // now nothing checked it against which innings is actually in progress —
+  // if Highlightly doesn't clear out an old partnership's entries between
+  // innings, the wrong pair of batters can show up here (e.g. a previous
+  // innings' not-out pair still lingering into the next one). Only entries
+  // matching the current (highest) innings number are kept; anything
+  // without an inning number at all is kept too, rather than discarded on
+  // an assumption that might be wrong.
+  const currentInningNumber = innings.length ? Math.max(...innings.map((i) => i.inningNumber || 0)) : null;
+  function isCurrentInning(entry) {
+    const inn = entry && entry.player && typeof entry.player.inning === 'number' ? entry.player.inning : null;
+    return currentInningNumber === null || inn === null || inn === currentInningNumber;
+  }
+
   const inplay = data.inplayData || {};
-  const inplayBatsmen = inplay.batsmen || [];
-  const inplayBowlers = inplay.bowlers || [];
+  const inplayBatsmen = (inplay.batsmen || []).filter(isCurrentInning);
+  const inplayBowlers = (inplay.bowlers || []).filter(isCurrentInning);
 
   let inplayHtml = '';
   if (inplayBatsmen.length || inplayBowlers.length) {
